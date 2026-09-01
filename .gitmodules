@@ -1,0 +1,3 @@
+[submodule "smart_token_website"]
+	path = smart_token_website
+	url = https://github.com/archachra/smart_token_website.git
