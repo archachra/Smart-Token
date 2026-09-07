@@ -6,11 +6,13 @@ import ParticipationPage from './pages/ParticipationPage.jsx'
 import AssignmentsPage from './pages/AssignmentsPage.jsx'
 import QuickTokenPage from './pages/QuickTokenPage.jsx'
 import HistoryPage from './pages/HistoryPage.jsx'
+import StudentHomePage from './pages/StudentHomePage.jsx'
 
 export default function App() {
   return (
     <BrowserRouter>
       <Routes>
+        <Route path="/student/*" element={<StudentHomePage />} />
         <Route path="/" element={<Layout />}>
           <Route index element={<HomePage />} />
           <Route path="attendance" element={<AttendancePage />} />
