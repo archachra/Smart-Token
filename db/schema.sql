@@ -5,6 +5,7 @@
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
 
 DROP TABLE IF EXISTS recording_sessions CASCADE;
+DROP TABLE IF EXISTS recording_evaluations CASCADE;
 DROP TABLE IF EXISTS raised_hands CASCADE;
 DROP TABLE IF EXISTS events CASCADE;
 DROP TABLE IF EXISTS student_balances CASCADE;
@@ -156,10 +157,19 @@ CREATE TABLE recording_sessions (
     raised_hand_id UUID NOT NULL REFERENCES raised_hands(id) ON DELETE CASCADE,
     status recording_status NOT NULL DEFAULT 'APPROVED',
     recording_source recording_source NOT NULL DEFAULT 'STUDENT_DEVICE',
+    topic TEXT,
+    extra_info TEXT,
+    audio_url TEXT,
+    transcript TEXT,
+    transcription_status TEXT NOT NULL DEFAULT 'PENDING',
+    transcription_error TEXT,
+    transcribed_at TIMESTAMPTZ,
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     started_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,
     CONSTRAINT unique_session_per_raised_hand UNIQUE (raised_hand_id)
+    ,CONSTRAINT recording_sessions_transcription_status_check
+      CHECK (transcription_status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED'))
 );
 
 -- Performance Indexes
@@ -176,4 +186,23 @@ CREATE INDEX idx_recording_sessions_section_id ON recording_sessions(section_id)
 CREATE INDEX idx_recording_sessions_student_id ON recording_sessions(student_id);
 CREATE INDEX idx_recording_sessions_raised_hand_id ON recording_sessions(raised_hand_id);
 
-
+CREATE TABLE recording_evaluations (
+    id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+    recording_session_id UUID NOT NULL UNIQUE REFERENCES recording_sessions(id) ON DELETE CASCADE,
+    status TEXT NOT NULL DEFAULT 'PENDING',
+    relevant BOOLEAN,
+    correct BOOLEAN,
+    reason TEXT,
+    suggested_token_change INTEGER,
+    provider TEXT,
+    model TEXT,
+    error_message TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    completed_at TIMESTAMPTZ,
+    final_token_change INTEGER,
+    finalized_by UUID REFERENCES users(id),
+    finalized_at TIMESTAMPTZ,
+    finalized_event_id UUID UNIQUE REFERENCES events(id),
+    CONSTRAINT recording_evaluations_status_check CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'FINALIZED')),
+    CONSTRAINT recording_evaluations_token_change_check CHECK (suggested_token_change IS NULL OR suggested_token_change BETWEEN -1 AND 1)
+);

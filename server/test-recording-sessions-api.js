@@ -23,7 +23,10 @@ async function runRecordingSessionsApiTests() {
 
     // Fetch valid sectionId and studentId from DB
     const sectionRes = await pool.query(`SELECT id FROM sections LIMIT 1`)
-    const studentRes = await pool.query(`SELECT id FROM students LIMIT 1`)
+    const studentRes = await pool.query(
+      `SELECT s.id FROM students s JOIN users u ON u.id = s.user_id
+       WHERE u.email = 'student@example.com' LIMIT 1`
+    )
 
     if (sectionRes.rowCount === 0 || studentRes.rowCount === 0) {
       throw new Error('Seed data missing. Run db/verify.js first!')
@@ -70,7 +73,8 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 1: Faculty Approves Recording (POST /api/sections/${sectionId}/participation/raised/${requestId}/approve)`)
     const res1 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${requestId}/approve`, {
       method: 'POST',
-      headers: authHeaders,
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: 'Test participation topic', extraInfo: 'Test context' }),
     })
     const body1 = await res1.json()
 
@@ -90,7 +94,7 @@ async function runRecordingSessionsApiTests() {
       `SELECT COALESCE(balance, 0) AS balance FROM student_balances WHERE student_id = $1 AND section_id = $2`,
       [studentId, sectionId]
     )
-    if (postBalRes.rows[0].balance !== initialBalance) {
+    if ((postBalRes.rowCount > 0 ? postBalRes.rows[0].balance : 0) !== initialBalance) {
       throw new Error('FAIL: student_balances was modified!')
     }
     console.log('✅ Test 1 PASSED: Faculty approval created APPROVED recording session without altering events/balances.\n')
@@ -99,7 +103,8 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 2: Duplicate Approval Attempt`)
     const res2 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${requestId}/approve`, {
       method: 'POST',
-      headers: authHeaders,
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: 'Test participation topic', extraInfo: 'Test context' }),
     })
     const body2 = await res2.json()
 
@@ -114,7 +119,8 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 3: Nonexistent Raised Hand Approval`)
     const res3 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${fakeRequestId}/approve`, {
       method: 'POST',
-      headers: authHeaders,
+      headers: { ...authHeaders, 'Content-Type': 'application/json' },
+      body: JSON.stringify({ topic: 'Test participation topic' }),
     })
     const body3 = await res3.json()
 
@@ -126,8 +132,15 @@ async function runRecordingSessionsApiTests() {
 
     // Test 4: Retrieve Student's Session (APPROVED state)
     console.log(`Test 4: Get Student Recording Session (GET /api/sections/${sectionId}/students/${studentId}/participation/recording)`)
+    const studentLoginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'student@example.com', password: 'StudentPass123!' }),
+    })
+    if (studentLoginRes.status !== 200) throw new Error('Login failed for student')
+    const { token: studentToken } = await studentLoginRes.json()
     const res4 = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${studentId}/participation/recording`, {
-      headers: authHeaders,
+      headers: { Authorization: `Bearer ${studentToken}` },
     })
     const body4 = await res4.json()
 

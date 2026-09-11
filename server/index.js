@@ -2,12 +2,25 @@ import express from 'express'
 import pool from './db.js'
 import bcrypt from 'bcrypt'
 import jwt from 'jsonwebtoken'
+import fs from 'fs'
+import path from 'path'
+import { fileURLToPath } from 'url'
 import { authenticate, requireRole } from './middleware/auth.js'
+import { processRecordingTranscription } from './services/transcription.js'
+import { processRecordingEvaluation, finalizeRecordingEvaluation } from './services/evaluation.js'
 
+const __filename = fileURLToPath(import.meta.url)
+const __dirname = path.dirname(__filename)
 
+const uploadsDir = path.join(__dirname, 'uploads', 'recordings')
+if (!fs.existsSync(uploadsDir)) {
+  fs.mkdirSync(uploadsDir, { recursive: true })
+}
 
 const app = express();
-app.use(express.json());
+app.use(express.json({ limit: '50mb' }));
+app.use(express.urlencoded({ extended: true, limit: '50mb' }));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -367,17 +380,22 @@ app.patch('/api/sections/:sectionId/students/:studentId/attendance', async (req,
 // POST /api/sections/:sectionId/participation/raise
 app.post('/api/sections/:sectionId/participation/raise', async (req, res) => {
   const { sectionId } = req.params
-  const { studentId } = req.body
+  let studentId
 
   // 1. Validate sectionId and studentId as UUIDs
   if (!sectionId || !UUID_REGEX.test(sectionId)) {
     return res.status(400).json({ error: 'Invalid or missing sectionId UUID' })
   }
-  if (!studentId || !UUID_REGEX.test(studentId)) {
-    return res.status(400).json({ error: 'Invalid or missing studentId UUID' })
-  }
-
   try {
+    const identityResult = await pool.query(
+      `SELECT id FROM students WHERE user_id = $1`,
+      [req.user.userId]
+    )
+    studentId = identityResult.rows[0]?.id
+    if (!studentId) {
+      return res.status(403).json({ error: 'Authenticated user is not a student' })
+    }
+
     // 2. Verify student is enrolled in the section
     const enrollmentCheck = await pool.query(
       `SELECT 1 FROM enrollments WHERE student_id = $1 AND section_id = $2`,
@@ -507,13 +525,21 @@ app.delete('/api/sections/:sectionId/participation/raised/:requestId', async (re
 // API 1: POST /api/sections/:sectionId/participation/raised/:requestId/approve
 app.post('/api/sections/:sectionId/participation/raised/:requestId/approve', async (req, res) => {
   const { sectionId, requestId } = req.params
+  const { topic, extraInfo } = req.body || {}
 
-  // 1. Validate UUIDs
+  if (req.user.role !== 'FACULTY') {
+    return res.status(403).json({ error: 'Forbidden: faculty role required' })
+  }
+
+  // 1. Validate UUIDs and required topic
   if (!sectionId || !UUID_REGEX.test(sectionId)) {
     return res.status(400).json({ error: 'Invalid or missing sectionId UUID' })
   }
   if (!requestId || !UUID_REGEX.test(requestId)) {
     return res.status(400).json({ error: 'Invalid or missing requestId UUID' })
+  }
+  if (!topic || typeof topic !== 'string' || !topic.trim()) {
+    return res.status(400).json({ error: 'Topic is required when approving participation' })
   }
 
   const client = await pool.connect()
@@ -544,41 +570,48 @@ app.post('/api/sections/:sectionId/participation/raised/:requestId/approve', asy
       [requestId]
     )
 
-    if (sessionCheck.rowCount > 0) {
+    if (sessionCheck.rowCount === 0) {
+      // Create APPROVED recording session with topic and extra_info
+      const insertResult = await client.query(
+        `INSERT INTO recording_sessions (section_id, student_id, raised_hand_id, status, recording_source, topic, extra_info)
+         VALUES ($1, $2, $3, 'APPROVED', 'STUDENT_DEVICE', $4, $5)
+         RETURNING 
+          id, 
+          section_id AS "sectionId", 
+          student_id AS "studentId", 
+          raised_hand_id AS "raisedHandId", 
+          status, 
+          recording_source AS "recordingSource", 
+          topic,
+          extra_info AS "extraInfo",
+          audio_url AS "audioUrl",
+          transcript,
+          transcription_status AS "transcriptionStatus",
+          transcription_error AS "transcriptionError",
+          transcribed_at AS "transcribedAt",
+          created_at AS "createdAt", 
+          started_at AS "startedAt", 
+          ended_at AS "endedAt"`,
+        [sectionId, studentId, requestId, topic.trim(), extraInfo ? extraInfo.trim() : null]
+      )
+
+      // Resolve the raised hand so it no longer appears in active queue
+      await client.query(
+        `UPDATE raised_hands SET resolved_at = NOW() WHERE id = $1`,
+        [requestId]
+      )
+
+      await client.query('COMMIT')
+      client.release()
+
+      return res.status(201).json({
+        session: insertResult.rows[0],
+      })
+    } else {
       await client.query('ROLLBACK')
       client.release()
       return res.status(400).json({ error: 'A recording session has already been created for this raised-hand request' })
     }
-
-    // 4. Create APPROVED recording session
-    const insertResult = await client.query(
-      `INSERT INTO recording_sessions (section_id, student_id, raised_hand_id, status, recording_source)
-       VALUES ($1, $2, $3, 'APPROVED', 'STUDENT_DEVICE')
-       RETURNING 
-        id, 
-        section_id AS "sectionId", 
-        student_id AS "studentId", 
-        raised_hand_id AS "raisedHandId", 
-        status, 
-        recording_source, 
-        created_at AS "createdAt", 
-        started_at AS "startedAt", 
-        ended_at AS "endedAt"`,
-      [sectionId, studentId, requestId]
-    )
-
-    // Resolve the raised hand so it no longer appears in active queue
-    await client.query(
-      `UPDATE raised_hands SET resolved_at = NOW() WHERE id = $1`,
-      [requestId]
-    )
-
-    await client.query('COMMIT')
-    client.release()
-
-    return res.status(201).json({
-      session: insertResult.rows[0],
-    })
   } catch (err) {
     try {
       await client.query('ROLLBACK')
@@ -607,9 +640,12 @@ app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/start'
   }
 
   try {
-    // 2. Verify recording session belongs to section
+    // 2. Verify recording session belongs to section and fetch student user ID
     const sessionCheck = await pool.query(
-      `SELECT id, status FROM recording_sessions WHERE id = $1 AND section_id = $2`,
+      `SELECT rs.id, rs.status, rs.student_id, s.user_id 
+       FROM recording_sessions rs
+       JOIN students s ON rs.student_id = s.id
+       WHERE rs.id = $1 AND rs.section_id = $2`,
       [recordingId, sectionId]
     )
 
@@ -617,7 +653,12 @@ app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/start'
       return res.status(404).json({ error: 'Recording session not found in this section' })
     }
 
-    const { status } = sessionCheck.rows[0]
+    const { status, user_id: studentUserId } = sessionCheck.rows[0]
+
+    // Security check: Authenticated student can only modify their own recording session
+    if (req.user && req.user.role === 'STUDENT' && req.user.userId !== studentUserId) {
+      return res.status(403).json({ error: 'Forbidden: Cannot access another student\'s recording session' })
+    }
 
     // 3. Verify current status is APPROVED
     if (status !== 'APPROVED') {
@@ -635,6 +676,13 @@ app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/start'
         student_id AS "studentId", 
         raised_hand_id AS "raisedHandId", 
         status, 
+        topic,
+        extra_info AS "extraInfo",
+        audio_url AS "audioUrl",
+        transcript,
+        transcription_status AS "transcriptionStatus",
+        transcription_error AS "transcriptionError",
+        transcribed_at AS "transcribedAt",
         created_at AS "createdAt", 
         started_at AS "startedAt", 
         ended_at AS "endedAt"`,
@@ -653,6 +701,7 @@ app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/start'
 // API 3: PATCH /api/sections/:sectionId/participation/recordings/:recordingId/complete
 app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/complete', async (req, res) => {
   const { sectionId, recordingId } = req.params
+  const { audioData, audioBase64 } = req.body || {}
 
   // 1. Validate UUIDs
   if (!sectionId || !UUID_REGEX.test(sectionId)) {
@@ -663,9 +712,12 @@ app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/comple
   }
 
   try {
-    // 2. Verify recording session belongs to section
+    // 2. Verify recording session belongs to section and fetch student user ID
     const sessionCheck = await pool.query(
-      `SELECT id, status FROM recording_sessions WHERE id = $1 AND section_id = $2`,
+      `SELECT rs.id, rs.status, rs.student_id, s.user_id 
+       FROM recording_sessions rs
+       JOIN students s ON rs.student_id = s.id
+       WHERE rs.id = $1 AND rs.section_id = $2`,
       [recordingId, sectionId]
     )
 
@@ -673,17 +725,39 @@ app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/comple
       return res.status(404).json({ error: 'Recording session not found in this section' })
     }
 
-    const { status } = sessionCheck.rows[0]
+    const { status, user_id: studentUserId } = sessionCheck.rows[0]
+
+    // Security check: Authenticated student can only complete their own recording session
+    if (req.user && req.user.role === 'STUDENT' && req.user.userId !== studentUserId) {
+      return res.status(403).json({ error: 'Forbidden: Cannot access another student\'s recording session' })
+    }
 
     // 3. Verify current status is RECORDING
     if (status !== 'RECORDING') {
       return res.status(400).json({ error: `Cannot complete recording. Current status is ${status}, expected RECORDING.` })
     }
 
-    // 4. Update status to COMPLETED and set ended_at
+    // Process audio payload if present
+    let savedAudioUrl = null
+    let savedAudioPath = null
+    const rawAudio = audioBase64 || audioData
+    if (rawAudio) {
+      const cleanBase64 = rawAudio.replace(/^data:audio\/[a-z0-9]+;base64,/, '')
+      const buffer = Buffer.from(cleanBase64, 'base64')
+      const fileName = `${recordingId}.webm`
+      savedAudioPath = path.join(uploadsDir, fileName)
+      fs.writeFileSync(savedAudioPath, buffer)
+      savedAudioUrl = `/uploads/recordings/${fileName}`
+    }
+
+    // 4. Update status to COMPLETED and set ended_at & audio_url
     const updateResult = await pool.query(
       `UPDATE recording_sessions
-       SET status = 'COMPLETED', ended_at = NOW()
+       SET status = 'COMPLETED', ended_at = NOW(), audio_url = COALESCE($3, audio_url),
+           transcription_status = CASE WHEN COALESCE($3, audio_url) IS NOT NULL THEN 'PENDING' ELSE transcription_status END,
+           transcript = CASE WHEN $3 IS NOT NULL THEN NULL ELSE transcript END,
+           transcription_error = CASE WHEN $3 IS NOT NULL THEN NULL ELSE transcription_error END,
+           transcribed_at = CASE WHEN $3 IS NOT NULL THEN NULL ELSE transcribed_at END
        WHERE id = $1 AND section_id = $2
        RETURNING 
         id, 
@@ -691,11 +765,24 @@ app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/comple
         student_id AS "studentId", 
         raised_hand_id AS "raisedHandId", 
         status, 
+        topic,
+        extra_info AS "extraInfo",
+        audio_url AS "audioUrl",
+        transcript,
+        transcription_status AS "transcriptionStatus",
+        transcription_error AS "transcriptionError",
+        transcribed_at AS "transcribedAt",
         created_at AS "createdAt", 
         started_at AS "startedAt", 
         ended_at AS "endedAt"`,
-      [recordingId, sectionId]
+      [recordingId, sectionId, savedAudioUrl]
     )
+
+    if (savedAudioPath) {
+      processRecordingTranscription(recordingId, savedAudioPath).catch((error) => {
+        console.error(`Unable to queue transcription for recording ${recordingId}:`, error)
+      })
+    }
 
     return res.status(200).json({
       session: updateResult.rows[0],
@@ -729,6 +816,23 @@ app.get('/api/sections/:sectionId/students/:studentId/participation/recording', 
       return res.status(404).json({ error: 'Section not found' })
     }
 
+    const ownerCheck = await pool.query(
+      `SELECT s.user_id AS "studentUserId"
+       FROM students s WHERE s.id = $1`,
+      [studentId]
+    )
+    if (ownerCheck.rowCount === 0) return res.status(404).json({ error: 'Student not found' })
+    if (req.user.role === 'STUDENT' && req.user.userId !== ownerCheck.rows[0].studentUserId) {
+      return res.status(403).json({ error: 'Forbidden: cannot access another student\'s recording' })
+    }
+    if (req.user.role === 'FACULTY') {
+      const assignment = await pool.query(
+        `SELECT 1 FROM section_faculty WHERE section_id = $1 AND faculty_id = $2`,
+        [sectionId, req.user.userId]
+      )
+      if (assignment.rowCount === 0) return res.status(403).json({ error: 'Forbidden: faculty is not assigned to this section' })
+    }
+
     // 3. Query student's latest active/current recording session in this section
     const result = await pool.query(
       `SELECT 
@@ -737,6 +841,13 @@ app.get('/api/sections/:sectionId/students/:studentId/participation/recording', 
         student_id AS "studentId",
         raised_hand_id AS "raisedHandId",
         status,
+        topic,
+        extra_info AS "extraInfo",
+        audio_url AS "audioUrl",
+        transcript,
+        transcription_status AS "transcriptionStatus",
+        transcription_error AS "transcriptionError",
+        transcribed_at AS "transcribedAt",
         created_at AS "createdAt",
         started_at AS "startedAt",
         ended_at AS "endedAt"
@@ -757,6 +868,157 @@ app.get('/api/sections/:sectionId/students/:studentId/participation/recording', 
   } catch (err) {
     console.error('Error fetching student recording session:', err)
     return res.status(500).json({ error: 'Internal server error while fetching recording session' })
+  }
+})
+
+// GET a recording transcript. Students may access only their own session;
+// faculty must be assigned to the section. Admins retain platform access.
+app.get('/api/sections/:sectionId/participation/recordings', async (req, res) => {
+  const { sectionId } = req.params
+  if (!UUID_REGEX.test(sectionId)) return res.status(400).json({ error: 'Invalid sectionId UUID' })
+  if (req.user.role !== 'ADMIN') {
+    const assignment = await pool.query(
+      `SELECT 1 FROM section_faculty WHERE section_id = $1 AND faculty_id = $2`,
+      [sectionId, req.user.userId]
+    )
+    if (assignment.rowCount === 0) return res.status(403).json({ error: 'Forbidden: faculty is not assigned to this section' })
+  }
+  try {
+    const result = await pool.query(
+      `SELECT rs.id, rs.student_id AS "studentId", s.name AS "studentName",
+              rs.status, rs.topic, rs.extra_info AS "extraInfo", rs.audio_url AS "audioUrl",
+              rs.transcript, rs.transcription_status AS "transcriptionStatus",
+              rs.transcription_error AS "transcriptionError", rs.transcribed_at AS "transcribedAt",
+              re.status AS "evaluationStatus", re.relevant AS "evaluationRelevant",
+              re.correct AS "evaluationCorrect", re.reason AS "evaluationReason",
+              re.suggested_token_change AS "suggestedTokenChange", re.error_message AS "evaluationError",
+              re.final_token_change AS "finalTokenChange", re.finalized_at AS "finalizedAt"
+       FROM recording_sessions rs
+       JOIN students s ON s.id = rs.student_id
+       LEFT JOIN recording_evaluations re ON re.recording_session_id = rs.id
+       WHERE rs.section_id = $1 ORDER BY rs.created_at DESC`,
+      [sectionId]
+    )
+    return res.status(200).json({ recordings: result.rows })
+  } catch (err) {
+    console.error('Error fetching section recordings:', err)
+    return res.status(500).json({ error: 'Internal server error while fetching recordings' })
+  }
+})
+
+app.get('/api/sections/:sectionId/participation/recordings/:recordingId/transcription', async (req, res) => {
+  const { sectionId, recordingId } = req.params
+  if (!UUID_REGEX.test(sectionId) || !UUID_REGEX.test(recordingId)) {
+    return res.status(400).json({ error: 'Invalid sectionId or recordingId UUID' })
+  }
+
+  try {
+    const result = await pool.query(
+      `SELECT rs.id, rs.section_id AS "sectionId", rs.student_id AS "studentId",
+              rs.status, rs.topic, rs.extra_info AS "extraInfo", rs.audio_url AS "audioUrl",
+              rs.transcript, rs.transcription_status AS "transcriptionStatus",
+              rs.transcription_error AS "transcriptionError", rs.transcribed_at AS "transcribedAt",
+              re.status AS "evaluationStatus", re.relevant AS "evaluationRelevant",
+              re.correct AS "evaluationCorrect", re.reason AS "evaluationReason",
+              re.suggested_token_change AS "suggestedTokenChange", re.error_message AS "evaluationError",
+              re.final_token_change AS "finalTokenChange", re.finalized_at AS "finalizedAt",
+              s.user_id AS "studentUserId"
+       FROM recording_sessions rs
+       JOIN students s ON s.id = rs.student_id
+       LEFT JOIN recording_evaluations re ON re.recording_session_id = rs.id
+       WHERE rs.id = $1 AND rs.section_id = $2`,
+      [recordingId, sectionId]
+    )
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Recording session not found in this section' })
+    }
+
+    const session = result.rows[0]
+    if (req.user.role === 'STUDENT' && req.user.userId !== session.studentUserId) {
+      return res.status(403).json({ error: 'Forbidden: cannot access another student\'s transcript' })
+    }
+    if (req.user.role === 'FACULTY') {
+      const assignment = await pool.query(
+        `SELECT 1 FROM section_faculty WHERE section_id = $1 AND faculty_id = $2`,
+        [sectionId, req.user.userId]
+      )
+      if (assignment.rowCount === 0) {
+        return res.status(403).json({ error: 'Forbidden: faculty is not assigned to this section' })
+      }
+    }
+
+    delete session.studentUserId
+    return res.status(200).json({ session })
+  } catch (err) {
+    console.error('Error fetching recording transcription:', err)
+    return res.status(500).json({ error: 'Internal server error while fetching transcription' })
+  }
+})
+
+app.get('/api/sections/:sectionId/participation/recordings/:recordingId/evaluation', async (req, res) => {
+  const { sectionId, recordingId } = req.params
+  if (!UUID_REGEX.test(sectionId) || !UUID_REGEX.test(recordingId)) return res.status(400).json({ error: 'Invalid sectionId or recordingId UUID' })
+  try {
+    const result = await pool.query(
+      `SELECT rs.id, rs.student_id AS "studentId", s.user_id AS "studentUserId",
+              rs.topic, rs.extra_info AS "extraInfo", rs.transcript,
+              rs.transcription_status AS "transcriptionStatus",
+              re.status, re.relevant, re.correct, re.reason,
+              re.suggested_token_change AS "suggestedTokenChange",
+              re.provider, re.model, re.error_message AS "errorMessage",
+              re.created_at AS "createdAt", re.completed_at AS "completedAt"
+       FROM recording_sessions rs
+       JOIN students s ON s.id = rs.student_id
+       LEFT JOIN recording_evaluations re ON re.recording_session_id = rs.id
+       WHERE rs.id = $1 AND rs.section_id = $2`,
+      [recordingId, sectionId]
+    )
+    if (result.rowCount === 0) return res.status(404).json({ error: 'Recording session not found in this section' })
+    const evaluation = result.rows[0]
+    if (req.user.role === 'STUDENT' && req.user.userId !== evaluation.studentUserId) return res.status(403).json({ error: 'Forbidden: cannot access another student\'s evaluation' })
+    if (req.user.role === 'FACULTY') {
+      const assignment = await pool.query(`SELECT 1 FROM section_faculty WHERE section_id = $1 AND faculty_id = $2`, [sectionId, req.user.userId])
+      if (assignment.rowCount === 0) return res.status(403).json({ error: 'Forbidden: faculty is not assigned to this section' })
+    }
+    delete evaluation.studentUserId
+    return res.status(200).json({ evaluation })
+  } catch (err) {
+    console.error('Error fetching evaluation:', err)
+    return res.status(500).json({ error: 'Internal server error while fetching evaluation' })
+  }
+})
+
+// Faculty/admin retry endpoint. It never writes token events or balances.
+app.post('/api/sections/:sectionId/participation/recordings/:recordingId/evaluation', async (req, res) => {
+  const { sectionId, recordingId } = req.params
+  if (!UUID_REGEX.test(sectionId) || !UUID_REGEX.test(recordingId)) return res.status(400).json({ error: 'Invalid sectionId or recordingId UUID' })
+  if (!['FACULTY', 'ADMIN'].includes(req.user.role)) return res.status(403).json({ error: 'Forbidden: faculty or admin role required' })
+  try {
+    const recording = await pool.query(`SELECT id, transcription_status AS "transcriptionStatus" FROM recording_sessions WHERE id = $1 AND section_id = $2`, [recordingId, sectionId])
+    if (recording.rowCount === 0) return res.status(404).json({ error: 'Recording session not found in this section' })
+    if (recording.rows[0].transcriptionStatus !== 'COMPLETED') return res.status(400).json({ error: 'Evaluation requires a completed transcript' })
+    await processRecordingEvaluation(recordingId)
+    return res.status(202).json({ message: 'Evaluation processing requested' })
+  } catch (err) {
+    console.error('Error processing evaluation:', err)
+    return res.status(500).json({ error: 'Evaluation processing failed' })
+  }
+})
+
+app.post('/api/sections/:sectionId/participation/recordings/:recordingId/evaluation/decision', async (req, res) => {
+  const { sectionId, recordingId } = req.params
+  const finalTokenChange = Number(req.body?.finalTokenChange)
+  if (!UUID_REGEX.test(sectionId) || !UUID_REGEX.test(recordingId)) return res.status(400).json({ error: 'Invalid sectionId or recordingId UUID' })
+  if (req.user.role !== 'FACULTY') return res.status(403).json({ error: 'Forbidden: faculty role required' })
+  try {
+    const assignment = await pool.query(`SELECT 1 FROM section_faculty WHERE section_id = $1 AND faculty_id = $2`, [sectionId, req.user.userId])
+    if (!assignment.rowCount) return res.status(403).json({ error: 'Forbidden: faculty is not assigned to this section' })
+    const result = await finalizeRecordingEvaluation({ recordingId, sectionId, facultyUserId: req.user.userId, finalTokenChange })
+    return res.status(200).json(result)
+  } catch (error) {
+    const status = error.statusCode || 500
+    if (status === 500) console.error('Error finalizing evaluation:', error)
+    return res.status(status).json({ error: error.message || 'Failed to finalize evaluation' })
   }
 })
 

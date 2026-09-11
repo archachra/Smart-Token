@@ -25,6 +25,9 @@ const allStudents = [
 export default function ParticipationPage() {
   // raisedHands now comes from the backend API
   const [raisedHands, setRaisedHands] = useState([])
+  const [recordings, setRecordings] = useState([])
+  const [finalChanges, setFinalChanges] = useState({})
+  const [finalizeErrors, setFinalizeErrors] = useState({})
   const [recordingStudentId, setRecordingStudentId] = useState(null)
   const pollTimer = useRef(null)
 
@@ -44,6 +47,8 @@ export default function ParticipationPage() {
           time: new Date(req.raisedAt).toLocaleTimeString(),
         }))
         setRaisedHands(mapped)
+        const recordingData = await get(`/api/sections/${SECTION_ID}/participation/recordings`)
+        setRecordings(recordingData.recordings || [])
       } catch (e) {
         console.error('Failed to load raised‑hand queue', e)
       }
@@ -54,6 +59,10 @@ export default function ParticipationPage() {
       if (pollTimer.current) clearInterval(pollTimer.current)
     }
   }, [])
+
+  const [topics, setTopics] = useState({})
+  const [extraInfos, setExtraInfos] = useState({})
+  const [approveErrors, setApproveErrors] = useState({})
 
   const handleStartRecording = (studentId) => {
     setRecordingStudentId(studentId)
@@ -74,12 +83,33 @@ export default function ParticipationPage() {
   }
 
   const handleApprove = async (requestId) => {
+    const topic = (topics[requestId] || '').trim()
+    const extraInfo = (extraInfos[requestId] || '').trim()
+    if (!topic) {
+      setApproveErrors((prev) => ({ ...prev, [requestId]: 'Topic is required to approve' }))
+      return
+    }
+    setApproveErrors((prev) => ({ ...prev, [requestId]: null }))
     try {
-      await post(`/api/sections/${SECTION_ID}/participation/raised/${requestId}/approve`)
+      await post(`/api/sections/${SECTION_ID}/participation/raised/${requestId}/approve`, {
+        topic,
+        extraInfo: extraInfo || null,
+      })
       // Optimistically remove the approved request from the queue
       setRaisedHands((prev) => prev.filter((item) => item.id !== requestId))
     } catch (e) {
       console.error('Approve failed', e)
+      setApproveErrors((prev) => ({ ...prev, [requestId]: 'Approve failed' }))
+    }
+  }
+
+  const finalizeEvaluation = async (recording, change) => {
+    try {
+      await post(`/api/sections/${SECTION_ID}/participation/recordings/${recording.id}/evaluation/decision`, { finalTokenChange: change })
+      const refreshed = await get(`/api/sections/${SECTION_ID}/participation/recordings`)
+      setRecordings(refreshed.recordings || [])
+    } catch (e) {
+      setFinalizeErrors((prev) => ({ ...prev, [recording.id]: e.message || 'Finalization failed' }))
     }
   }
 
@@ -184,6 +214,28 @@ export default function ParticipationPage() {
                       <span className="request-time">{item.seat} • {item.time}</span>
                     </div>
 
+                    {!isRecording && (
+                      <div style={{ margin: '0.5rem 0', display: 'flex', flexDirection: 'column', gap: '0.3rem' }}>
+                        <input
+                          type="text"
+                          placeholder="Topic (required) e.g. Computer Networks"
+                          value={topics[item.id] || ''}
+                          onChange={(e) => setTopics({ ...topics, [item.id]: e.target.value })}
+                          style={{ padding: '0.35rem 0.5rem', borderRadius: '4px', border: '1px solid #ccc', fontSize: '0.85rem' }}
+                        />
+                        <input
+                          type="text"
+                          placeholder="Extra Info (optional) e.g. Explain TCP vs UDP"
+                          value={extraInfos[item.id] || ''}
+                          onChange={(e) => setExtraInfos({ ...extraInfos, [item.id]: e.target.value })}
+                          style={{ padding: '0.35rem 0.5rem', borderRadius: '4px', border: '1px solid #ccc', fontSize: '0.85rem' }}
+                        />
+                        {approveErrors[item.id] && (
+                          <span style={{ color: '#dc2626', fontSize: '0.75rem', fontWeight: 600 }}>{approveErrors[item.id]}</span>
+                        )}
+                      </div>
+                    )}
+
                     {isRecording ? (
                       <div className="recording-controls">
                         <span className="recording-status-text">🔴 Recording...</span>
@@ -215,6 +267,44 @@ export default function ParticipationPage() {
               })}
             </div>
           )}
+
+          <div style={{ marginTop: '1.5rem' }}>
+            <div className="panel-header"><h3>Completed Responses</h3></div>
+            {recordings.length === 0 ? <p>No recordings yet</p> : recordings.map((recording) => (
+              <div key={recording.id} style={{ padding: '0.7rem 0', borderBottom: '1px solid #e2e8f0' }}>
+                <strong>{recording.studentName}</strong>
+                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{recording.topic}</div>
+                {recording.transcriptionStatus === 'COMPLETED' ? (
+                  <p style={{ margin: '0.35rem 0 0' }}>{recording.transcript || '(Empty transcript)'}</p>
+                ) : recording.transcriptionStatus === 'FAILED' ? (
+                  <p style={{ margin: '0.35rem 0 0', color: '#dc2626' }}>Transcription failed</p>
+                ) : (
+                  <p style={{ margin: '0.35rem 0 0', color: '#64748b' }}>Transcription processing…</p>
+                )}
+                {recording.evaluationStatus === 'COMPLETED' && (
+                  <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: '#f8fafc' }}>
+                    <strong>AI suggestion (faculty review required)</strong>
+                    <div>{recording.evaluationRelevant ? 'Relevant' : 'Not relevant'} · {recording.evaluationCorrect ? 'Correct' : 'Needs improvement'}</div>
+                    <div>{recording.evaluationReason}</div>
+                    <div>Suggested token change: {recording.suggestedTokenChange > 0 ? '+' : ''}{recording.suggestedTokenChange}</div>
+                    {recording.evaluationStatus === 'FINALIZED' ? (
+                      <div style={{ color: '#166534', fontWeight: 600 }}>Finalized: {recording.finalTokenChange > 0 ? '+' : ''}{recording.finalTokenChange} token(s)</div>
+                    ) : (
+                      <div style={{ marginTop: '0.5rem' }}>
+                        <button className="recording-action-btn start" onClick={() => finalizeEvaluation(recording, recording.suggestedTokenChange)}>Approve Suggestion</button>
+                        <select value={finalChanges[recording.id] ?? recording.suggestedTokenChange} onChange={(e) => setFinalChanges((prev) => ({ ...prev, [recording.id]: Number(e.target.value) }))} style={{ marginLeft: '0.5rem' }}>
+                          <option value="-1">-1</option><option value="0">0</option><option value="1">+1</option>
+                        </select>
+                        <button className="recording-action-btn start" onClick={() => finalizeEvaluation(recording, finalChanges[recording.id] ?? recording.suggestedTokenChange)} style={{ marginLeft: '0.5rem' }}>Finalize Edited</button>
+                        {finalizeErrors[recording.id] && <div style={{ color: '#dc2626' }}>{finalizeErrors[recording.id]}</div>}
+                      </div>
+                    )}
+                  </div>
+                )}
+                {recording.evaluationStatus === 'FAILED' && <p style={{ color: '#dc2626' }}>AI evaluation failed; no token change was made.</p>}
+              </div>
+            ))}
+          </div>
         </aside>
       </div>
     </div>
