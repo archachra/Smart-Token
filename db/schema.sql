@@ -22,6 +22,7 @@ DROP TYPE IF EXISTS user_role CASCADE;
 -- Enums
 CREATE TYPE user_role AS ENUM ('ADMIN', 'FACULTY', 'STUDENT');
 CREATE TYPE event_type AS ENUM ('ATTENDANCE', 'PARTICIPATION', 'TOKEN_AWARD', 'CORRECTION');
+CREATE TYPE recording_source AS ENUM ('STUDENT_DEVICE', 'FACULTY_DEVICE');
 CREATE TYPE recording_status AS ENUM ('APPROVED', 'RECORDING', 'COMPLETED');
 
 -- Helper function to automatically update timestamps
@@ -143,6 +144,7 @@ CREATE TABLE raised_hands (
     section_id UUID NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     raised_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+    resolved_at TIMESTAMPTZ,
     CONSTRAINT unique_active_raised_hand UNIQUE (section_id, student_id)
 );
 
@@ -153,6 +155,7 @@ CREATE TABLE recording_sessions (
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     raised_hand_id UUID NOT NULL REFERENCES raised_hands(id) ON DELETE CASCADE,
     status recording_status NOT NULL DEFAULT 'APPROVED',
+    recording_source recording_source NOT NULL DEFAULT 'STUDENT_DEVICE',
     created_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     started_at TIMESTAMPTZ,
     ended_at TIMESTAMPTZ,

@@ -24,9 +24,23 @@ async function runApiTests() {
     }
     const validSectionId = sectionRes.rows[0].id
 
+    // Unauthenticated request (should be 401)
+    const unauthRes = await fetch(`${baseUrl}/api/sections/${validSectionId}/students`)
+    if (unauthRes.status !== 401) throw new Error(`Expected 401 for unauthenticated roster request, got ${unauthRes.status}`)
+
+    // Login to obtain JWT for Faculty
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'faculty@example.com', password: 'FacultyPass123!' }),
+    })
+    if (loginRes.status !== 200) throw new Error('Login failed for faculty')
+    const { token } = await loginRes.json()
+    const authHeaders = { Authorization: `Bearer ${token}` }
+
     // Test Case 1: Valid Section ID
     console.log(`Test 1: GET /api/sections/${validSectionId}/students (Valid Section)`)
-    const res1 = await fetch(`${baseUrl}/api/sections/${validSectionId}/students`)
+    const res1 = await fetch(`${baseUrl}/api/sections/${validSectionId}/students`, { headers: authHeaders })
     const body1 = await res1.json()
 
     console.log(`Status Code: ${res1.status}`)
@@ -45,7 +59,7 @@ async function runApiTests() {
     // Test Case 2: Non-Existent Section (Valid UUID)
     const nonExistentUuid = '00000000-0000-0000-0000-000000000000'
     console.log(`Test 2: GET /api/sections/${nonExistentUuid}/students (Non-Existent Section)`)
-    const res2 = await fetch(`${baseUrl}/api/sections/${nonExistentUuid}/students`)
+    const res2 = await fetch(`${baseUrl}/api/sections/${nonExistentUuid}/students`, { headers: authHeaders })
     const body2 = await res2.json()
 
     console.log(`Status Code: ${res2.status}`)
@@ -58,7 +72,7 @@ async function runApiTests() {
     // Test Case 3: Invalid UUID Format
     const invalidId = 'not-a-valid-uuid'
     console.log(`Test 3: GET /api/sections/${invalidId}/students (Invalid Section ID Format)`)
-    const res3 = await fetch(`${baseUrl}/api/sections/${invalidId}/students`)
+    const res3 = await fetch(`${baseUrl}/api/sections/${invalidId}/students`, { headers: authHeaders })
     const body3 = await res3.json()
 
     console.log(`Status Code: ${res3.status}`)

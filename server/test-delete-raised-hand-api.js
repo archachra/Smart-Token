@@ -29,8 +29,23 @@ async function runDeleteRaisedHandApiTests() {
       throw new Error('Seed data missing. Run db/verify.js first!')
     }
 
-    const sectionId = sectionRes.rows[0].id
-    const studentId = studentRes.rows[0].id
+    // Fetch valid IDs
+    const sectionId = sectionRes.rows[0].id;
+    const studentId = studentRes.rows[0].id;
+    // Unauthenticated request (should be 401)
+    const unauthRes = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${generateUuid()}`, {
+      method: 'DELETE'
+    });
+    if (unauthRes.status !== 401) throw new Error(`Expected 401 for unauthenticated delete, got ${unauthRes.status}`);
+    // Login to obtain JWT for Faculty
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'faculty@example.com', password: 'FacultyPass123!' })
+    });
+    if (loginRes.status !== 200) throw new Error('Login failed for faculty');
+    const { token } = await loginRes.json();
+    const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
     // Ensure clean state: delete any existing raised_hands for test student
     await pool.query(`DELETE FROM raised_hands WHERE student_id = $1 AND section_id = $2`, [studentId, sectionId])
@@ -56,6 +71,7 @@ async function runDeleteRaisedHandApiTests() {
     console.log(`Test 1: DELETE /api/sections/${sectionId}/participation/raised/${requestId} (Successful Removal)`)
     const res1 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${requestId}`, {
       method: 'DELETE',
+      headers: authHeaders,
     })
     const body1 = await res1.json()
 
@@ -70,9 +86,9 @@ async function runDeleteRaisedHandApiTests() {
       throw new Error('Removed request ID mismatch')
     }
 
-    // Verify request is gone from DB
-    const checkDbRes = await pool.query(`SELECT 1 FROM raised_hands WHERE id = $1`, [requestId])
-    if (checkDbRes.rowCount > 0) throw new Error('FAIL: Raised-hand request still exists in database!')
+    // Verify active request is gone from DB (resolved_at IS NOT NULL)
+    const checkDbRes = await pool.query(`SELECT 1 FROM raised_hands WHERE id = $1 AND resolved_at IS NULL`, [requestId])
+    if (checkDbRes.rowCount > 0) throw new Error('FAIL: Active raised-hand request still exists in database!')
 
     // Assert NO events created and student_balances NOT modified
     const postEventCountRes = await pool.query(`SELECT COUNT(*)::int AS count FROM events`)
@@ -95,6 +111,7 @@ async function runDeleteRaisedHandApiTests() {
     console.log(`Test 2: Non-Existent Request ID (${nonExistentRequestId})`)
     const res2 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${nonExistentRequestId}`, {
       method: 'DELETE',
+      headers: authHeaders,
     })
     const body2 = await res2.json()
 
@@ -109,6 +126,8 @@ async function runDeleteRaisedHandApiTests() {
 
     // Test Case 3: Request Belonging to Wrong Section ID
     const wrongSectionId = generateUuid()
+    // Ensure clean state: delete any existing raised_hands for test student
+    await pool.query(`DELETE FROM raised_hands WHERE student_id = $1 AND section_id = $2`, [studentId, sectionId])
     // Re-insert raised hand under valid sectionId
     const reInsertRes = await pool.query(
       `INSERT INTO raised_hands (section_id, student_id) VALUES ($1, $2) RETURNING id`,
@@ -119,6 +138,7 @@ async function runDeleteRaisedHandApiTests() {
     console.log(`Test 3: Wrong Section ID (${wrongSectionId})`)
     const res3 = await fetch(`${baseUrl}/api/sections/${wrongSectionId}/participation/raised/${validRequestId}`, {
       method: 'DELETE',
+      headers: authHeaders,
     })
     const body3 = await res3.json()
 
@@ -135,6 +155,7 @@ async function runDeleteRaisedHandApiTests() {
     console.log(`Test 4: Invalid UUID Format`)
     const res4 = await fetch(`${baseUrl}/api/sections/invalid-section-uuid/participation/raised/invalid-request-uuid`, {
       method: 'DELETE',
+      headers: authHeaders,
     })
     const body4 = await res4.json()
 

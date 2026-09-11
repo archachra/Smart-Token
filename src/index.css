@@ -455,6 +455,78 @@ body {
   transform: scale(0.96);
 }
 
+/* Student UI styles */
+.student-card {
+  padding: 1.5rem;
+  background-color: var(--bg-surface);
+  border-radius: var(--radius-lg);
+  box-shadow: var(--shadow-md);
+}
+.student-header {
+  font-size: 1.5rem;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin-bottom: 0.5rem;
+}
+.student-id {
+  margin-bottom: 0.25rem;
+  color: var(--text-secondary);
+}
+.balance {
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: var(--primary-color);
+  margin-bottom: 0.75rem;
+}
+.status {
+  font-size: 1rem;
+  color: var(--text-secondary);
+  margin-bottom: 1rem;
+}
+
+/* Student button styles */
+.student-btn {
+  background-color: var(--primary-color);
+  color: #ffffff;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.student-btn:hover {
+  background-color: var(--primary-hover);
+}
+.student-btn-cancel {
+  background-color: #e5e7eb;
+  color: #111827;
+  border: none;
+  border-radius: var(--radius-md);
+  padding: 0.5rem 1rem;
+  font-size: 0.9rem;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background-color 0.15s ease;
+}
+.student-btn-cancel:hover {
+  background-color: #9ca3af;
+}
+
+.action-container {
+  display: flex;
+  justify-content: center;
+  gap: 0.75rem;
+  margin-top: 1rem;
+}
+.loading {
+  padding: 1rem;
+  text-align: center;
+  color: var(--text-secondary);
+}
+
+
 /* Recent Activity Section */
 .activity-section {
   display: flex;

@@ -30,7 +30,25 @@ async function runRaisedHandApiTests() {
     }
 
     const sectionId = sectionRes.rows[0].id
-    const studentId = studentRes.rows[0].id
+    const studentId = studentRes.rows[0].id;
+  // Unauthenticated request (should be 401)
+  const unauthRes = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raise`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ studentId }),
+  });
+  if (unauthRes.status !== 401) throw new Error(`Expected 401 for unauthenticated raise hand, got ${unauthRes.status}`);
+
+  // Login to obtain JWT for Student
+  const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email: 'student@example.com', password: 'StudentPass123!' }),
+  });
+  if (loginRes.status !== 200) throw new Error('Login failed for student');
+  const { token } = await loginRes.json();
+  const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+
 
     // Ensure clean state: delete any existing raised_hands for this test student
     await pool.query(
@@ -52,7 +70,7 @@ async function runRaisedHandApiTests() {
     console.log(`Test 1: Successful Raise Hand`)
     const res1 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raise`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         studentId,
       }),
@@ -90,7 +108,7 @@ async function runRaisedHandApiTests() {
     console.log(`Test 2: Duplicate Active Raised Hand Attempt`)
     const res2 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raise`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         studentId,
       }),
@@ -120,7 +138,7 @@ async function runRaisedHandApiTests() {
     console.log(`Test 3: Invalid Enrollment (Unenrolled Student)`)
     const res3 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raise`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         studentId: unenrolledStudentId,
       }),
@@ -138,7 +156,7 @@ async function runRaisedHandApiTests() {
     console.log(`Test 4: Invalid UUID Format`)
     const res4 = await fetch(`${baseUrl}/api/sections/invalid-uuid/participation/raise`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         studentId: 'bad-student-uuid',
       }),

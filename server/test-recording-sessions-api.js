@@ -50,10 +50,27 @@ async function runRecordingSessionsApiTests() {
     )
     const initialBalance = initBalRes.rowCount > 0 ? initBalRes.rows[0].balance : 0
 
+    // Unauthenticated request (should be 401)
+    const unauthRes = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${requestId}/approve`, {
+      method: 'POST',
+    })
+    if (unauthRes.status !== 401) throw new Error(`Expected 401 for unauthenticated recording session approval, got ${unauthRes.status}`)
+
+    // Login to obtain JWT for Faculty
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'faculty@example.com', password: 'FacultyPass123!' }),
+    })
+    if (loginRes.status !== 200) throw new Error('Login failed for faculty')
+    const { token } = await loginRes.json()
+    const authHeaders = { Authorization: `Bearer ${token}` }
+
     // Test 1: Successful Faculty Approval
     console.log(`Test 1: Faculty Approves Recording (POST /api/sections/${sectionId}/participation/raised/${requestId}/approve)`)
     const res1 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${requestId}/approve`, {
       method: 'POST',
+      headers: authHeaders,
     })
     const body1 = await res1.json()
 
@@ -82,6 +99,7 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 2: Duplicate Approval Attempt`)
     const res2 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${requestId}/approve`, {
       method: 'POST',
+      headers: authHeaders,
     })
     const body2 = await res2.json()
 
@@ -96,6 +114,7 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 3: Nonexistent Raised Hand Approval`)
     const res3 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${fakeRequestId}/approve`, {
       method: 'POST',
+      headers: authHeaders,
     })
     const body3 = await res3.json()
 
@@ -107,7 +126,9 @@ async function runRecordingSessionsApiTests() {
 
     // Test 4: Retrieve Student's Session (APPROVED state)
     console.log(`Test 4: Get Student Recording Session (GET /api/sections/${sectionId}/students/${studentId}/participation/recording)`)
-    const res4 = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${studentId}/participation/recording`)
+    const res4 = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${studentId}/participation/recording`, {
+      headers: authHeaders,
+    })
     const body4 = await res4.json()
 
     console.log(`Status Code: ${res4.status}`)
@@ -123,6 +144,7 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 5: Invalid State Transition (Complete session while APPROVED)`)
     const res5 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/recordings/${recordingId}/complete`, {
       method: 'PATCH',
+      headers: authHeaders,
     })
     const body5 = await res5.json()
 
@@ -136,6 +158,7 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 6: Student Starts Recording (PATCH /api/sections/${sectionId}/participation/recordings/${recordingId}/start)`)
     const res6 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/recordings/${recordingId}/start`, {
       method: 'PATCH',
+      headers: authHeaders,
     })
     const body6 = await res6.json()
 
@@ -152,6 +175,7 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 7: Second Start Attempt while RECORDING`)
     const res7 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/recordings/${recordingId}/start`, {
       method: 'PATCH',
+      headers: authHeaders,
     })
     const body7 = await res7.json()
 
@@ -165,6 +189,7 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 8: Student Stops Recording (PATCH /api/sections/${sectionId}/participation/recordings/${recordingId}/complete)`)
     const res8 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/recordings/${recordingId}/complete`, {
       method: 'PATCH',
+      headers: authHeaders,
     })
     const body8 = await res8.json()
 
@@ -182,6 +207,7 @@ async function runRecordingSessionsApiTests() {
     console.log(`Test 9: Section Scoping Check (Using wrong sectionId on start)`)
     const res9 = await fetch(`${baseUrl}/api/sections/${wrongSectionId}/participation/recordings/${recordingId}/start`, {
       method: 'PATCH',
+      headers: authHeaders,
     })
     const body9 = await res9.json()
 
@@ -193,7 +219,9 @@ async function runRecordingSessionsApiTests() {
 
     // Test 10: Invalid UUID Formats
     console.log(`Test 10: Invalid UUID Formats`)
-    const res10 = await fetch(`${baseUrl}/api/sections/bad-uuid/students/bad-uuid/participation/recording`)
+    const res10 = await fetch(`${baseUrl}/api/sections/bad-uuid/students/bad-uuid/participation/recording`, {
+      headers: authHeaders,
+    })
     const body10 = await res10.json()
 
     console.log(`Status Code: ${res10.status}`)

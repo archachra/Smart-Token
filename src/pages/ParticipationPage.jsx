@@ -1,4 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { get, post } from '../utils/api.js'
+
+// Section ID (hard‑coded for demo)
+const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 
 const allStudents = [
   { id: 1, rollNumber: 'CS101-001', name: 'Alex Johnson', seat: 'Row 1 • Seat 3', initials: 'AJ', color: '#2563eb' },
@@ -18,15 +22,38 @@ const allStudents = [
   { id: 15, rollNumber: 'CS101-015', name: 'Sarah Chen', seat: 'Row 2 • Seat 5', initials: 'SC', color: '#059669' },
 ]
 
-const initialRaisedHands = [
-  { id: 'rh1', studentId: 14, studentName: 'Marcus Vance', seat: 'Row 1 • Seat 1', time: '3 mins ago' },
-  { id: 'rh2', studentId: 15, studentName: 'Sarah Chen', seat: 'Row 2 • Seat 5', time: '5 mins ago' },
-  { id: 'rh3', studentId: 6, studentName: 'David Kim', seat: 'Row 2 • Seat 4', time: '8 mins ago' },
-]
-
 export default function ParticipationPage() {
-  const [raisedHands, setRaisedHands] = useState(initialRaisedHands)
+  // raisedHands now comes from the backend API
+  const [raisedHands, setRaisedHands] = useState([])
   const [recordingStudentId, setRecordingStudentId] = useState(null)
+  const pollTimer = useRef(null)
+
+  // Load raised‑hand queue on mount and start polling
+  useEffect(() => {
+    async function fetchQueue() {
+      try {
+        const data = await get(`/api/sections/${SECTION_ID}/participation/raised`)
+        // Backend returns { requests: [] }
+        const mapped = (data.requests || []).map((req) => ({
+          id: req.id,
+          studentId: req.studentId,
+          studentName: req.studentName,
+          // Use studentIdNumber as a placeholder for seat/info if needed
+          seat: req.studentIdNumber || '',
+          // Display human‑readable time offset – for simplicity show ISO string
+          time: new Date(req.raisedAt).toLocaleTimeString(),
+        }))
+        setRaisedHands(mapped)
+      } catch (e) {
+        console.error('Failed to load raised‑hand queue', e)
+      }
+    }
+    fetchQueue()
+    pollTimer.current = setInterval(fetchQueue, 2500)
+    return () => {
+      if (pollTimer.current) clearInterval(pollTimer.current)
+    }
+  }, [])
 
   const handleStartRecording = (studentId) => {
     setRecordingStudentId(studentId)
@@ -34,7 +61,7 @@ export default function ParticipationPage() {
 
   const handleStopRecording = (studentId) => {
     setRecordingStudentId(null)
-    // Remove student from raised hands queue if present
+    // Remove student from raised‑hand queue if present
     setRaisedHands((prev) => prev.filter((item) => item.studentId !== studentId))
   }
 
@@ -43,6 +70,16 @@ export default function ParticipationPage() {
       handleStopRecording(studentId)
     } else {
       handleStartRecording(studentId)
+    }
+  }
+
+  const handleApprove = async (requestId) => {
+    try {
+      await post(`/api/sections/${SECTION_ID}/participation/raised/${requestId}/approve`)
+      // Optimistically remove the approved request from the queue
+      setRaisedHands((prev) => prev.filter((item) => item.id !== requestId))
+    } catch (e) {
+      console.error('Approve failed', e)
     }
   }
 
@@ -107,7 +144,7 @@ export default function ParticipationPage() {
                         handleToggleRecording(student.id)
                       }}
                     >
-                      {isRecording ? 'Stop Recording' : 'Start Recording'}
+                      {isRecording ? 'Stop Recording' : 'Record from Here'}
                     </button>
                   </div>
                 )
@@ -158,12 +195,20 @@ export default function ParticipationPage() {
                         </button>
                       </div>
                     ) : (
-                      <button
-                        className="recording-action-btn start"
-                        onClick={() => handleStartRecording(item.studentId)}
-                      >
-                        Start Recording
-                      </button>
+                      <div className="recording-controls">
+                        <button
+                          className="recording-action-btn start"
+                          onClick={() => handleApprove(item.id)}
+                        >
+                          Approve
+                        </button>
+                        <button
+                          className="recording-action-btn start"
+                          onClick={() => handleStartRecording(item.studentId)}
+                        >
+                          Start Recording
+                        </button>
+                      </div>
                     )}
                   </div>
                 )

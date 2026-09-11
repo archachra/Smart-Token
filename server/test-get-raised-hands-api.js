@@ -23,12 +23,26 @@ async function runGetRaisedHandsApiTests() {
     }
     const sectionId = sectionRes.rows[0].id
 
+    // Unauthenticated request (should be 401)
+    const unauthRes = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised`)
+    if (unauthRes.status !== 401) throw new Error(`Expected 401 for unauthenticated get raised hands, got ${unauthRes.status}`)
+
+    // Login to obtain JWT for Faculty
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'faculty@example.com', password: 'FacultyPass123!' }),
+    })
+    if (loginRes.status !== 200) throw new Error('Login failed for faculty')
+    const { token } = await loginRes.json()
+    const authHeaders = { Authorization: `Bearer ${token}` }
+
     // Test Case 1: Empty Queue
     // Ensure clean state: delete any existing raised_hands for this section
     await pool.query(`DELETE FROM raised_hands WHERE section_id = $1`, [sectionId])
 
     console.log(`Test 1: Empty Queue (No active raised hands)`)
-    const res1 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised`)
+    const res1 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised`, { headers: authHeaders })
     const body1 = await res1.json()
 
     console.log(`Status Code: ${res1.status}`)
@@ -68,7 +82,7 @@ async function runGetRaisedHandsApiTests() {
     )
 
     console.log(`Test 2: Successful Retrieval & Chronological Ordering (raised_at ASC)`)
-    const res2 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised`)
+    const res2 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised`, { headers: authHeaders })
     const body2 = await res2.json()
 
     console.log(`Status Code: ${res2.status}`)
@@ -98,7 +112,7 @@ async function runGetRaisedHandsApiTests() {
 
     // Test Case 3: Invalid Section UUID Format
     console.log(`Test 3: Invalid Section UUID Format`)
-    const res3 = await fetch(`${baseUrl}/api/sections/invalid-section-uuid/participation/raised`)
+    const res3 = await fetch(`${baseUrl}/api/sections/invalid-section-uuid/participation/raised`, { headers: authHeaders })
     const body3 = await res3.json()
 
     console.log(`Status Code: ${res3.status}`)
@@ -111,7 +125,7 @@ async function runGetRaisedHandsApiTests() {
     // Test Case 4: Non-Existent Section ID
     const nonExistentUuid = '00000000-0000-0000-0000-000000000000'
     console.log(`Test 4: Non-Existent Section ID`)
-    const res4 = await fetch(`${baseUrl}/api/sections/${nonExistentUuid}/participation/raised`)
+    const res4 = await fetch(`${baseUrl}/api/sections/${nonExistentUuid}/participation/raised`, { headers: authHeaders })
     const body4 = await res4.json()
 
     console.log(`Status Code: ${res4.status}`)
