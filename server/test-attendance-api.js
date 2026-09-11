@@ -1,6 +1,7 @@
 process.env.NODE_ENV = 'test'
 
 import crypto from 'crypto'
+import jwt from 'jsonwebtoken'
 import pool from './db.js'
 import app from './index.js'
 
@@ -33,7 +34,23 @@ async function runAttendanceApiTests() {
     const sectionId = sectionRes.rows[0].id
     const studentId = studentRes.rows[0].id
     const createdBy = facultyRes.rows[0].id
+    // Unauthenticated request (should be 401)
+    const unauthRes = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${studentId}/attendance`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ status: 'PRESENT', clientEventId: generateUuid(), createdBy }),
+    });
+    if (unauthRes.status !== 401) throw new Error(`Expected 401 for unauthenticated attendance, got ${unauthRes.status}`);
 
+    // Login to obtain JWT for Faculty
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'faculty@example.com', password: 'FacultyPass123!' }),
+    });
+    if (loginRes.status !== 200) throw new Error('Login failed for faculty');
+    const { token } = await loginRes.json();
+    const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
     // Ensure student starts in 'ABSENT' state with initial balance
     await pool.query(
       `UPDATE enrollments SET attendance_status = 'ABSENT' WHERE student_id = $1 AND section_id = $2`,
@@ -51,7 +68,7 @@ async function runAttendanceApiTests() {
     console.log(`Test 1: ABSENT -> PRESENT (+1 Token)`)
     const res1 = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${studentId}/attendance`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         status: 'PRESENT',
         clientEventId: clientEventId1,
@@ -74,7 +91,7 @@ async function runAttendanceApiTests() {
     console.log(`Test 2: PRESENT -> ABSENT (-1 Token)`)
     const res2 = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${studentId}/attendance`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         status: 'ABSENT',
         clientEventId: clientEventId2,
@@ -97,7 +114,7 @@ async function runAttendanceApiTests() {
     console.log(`Test 3: Repeated Same-Status Update (ABSENT -> ABSENT)`)
     const res3 = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${studentId}/attendance`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         status: 'ABSENT',
         clientEventId: clientEventId3,
@@ -119,7 +136,7 @@ async function runAttendanceApiTests() {
     console.log(`Test 4: Idempotency Check with Duplicate clientEventId`)
     const res4 = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${studentId}/attendance`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         status: 'PRESENT', // different status attempt, should be idempotent
         clientEventId: clientEventId1, // reusing clientEventId1
@@ -149,7 +166,7 @@ async function runAttendanceApiTests() {
     console.log(`Test 5: Invalid Enrollment (Unenrolled Student)`)
     const res5 = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${unenrolledStudentId}/attendance`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         status: 'PRESENT',
         clientEventId: generateUuid(),
@@ -167,10 +184,12 @@ async function runAttendanceApiTests() {
 
     // Test 6: Transaction Failure Handling (FK failure inside transaction)
     const fakeCreatedBy = generateUuid()
+    const fakeToken = jwt.sign({ userId: fakeCreatedBy, role: 'FACULTY' }, process.env.JWT_SECRET || 'dev-secret')
+    const fakeAuthHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${fakeToken}` }
     console.log(`Test 6: Transaction Failure & Rollback Handling`)
     const res6 = await fetch(`${baseUrl}/api/sections/${sectionId}/students/${studentId}/attendance`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
+      headers: fakeAuthHeaders,
       body: JSON.stringify({
         status: 'PRESENT',
         clientEventId: generateUuid(),

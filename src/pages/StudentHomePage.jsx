@@ -2,8 +2,8 @@ import React, { useState, useEffect, useRef } from 'react';
 import { get, post, patch, del } from '../utils/api.js';
 
 // Hard‑coded demo IDs – replace with real auth values later
-const SECTION_ID = '00000000-0000-0000-0000-000000000001';
-const STUDENT_ID = '11111111-1111-1111-1111-111111111111';
+const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7';
+const STUDENT_ID = '68bf0413-6cf3-41ef-8bb7-613fbaa49198';
 
 const UI_STATES = {
   IDLE: 'IDLE',
@@ -26,7 +26,9 @@ export default function StudentHomePage() {
     async function loadRoster() {
       try {
         const data = await get(`/api/sections/${SECTION_ID}/students`);
-        const me = data.find((s) => s.id === STUDENT_ID);
+        // API returns { sectionId, students: [] }
+        const roster = data.students || [];
+        const me = roster.find((s) => s.id === STUDENT_ID);
         if (me) {
           setStudent(me);
           setBalance(me.balance);
@@ -76,7 +78,7 @@ export default function StudentHomePage() {
         `/api/sections/${SECTION_ID}/participation/raise`,
         { studentId: STUDENT_ID }
       );
-      setRaisedHandId(resp.id);
+      setRaisedHandId(resp.request.id);
       setUiState(UI_STATES.WAITING);
       startPolling();
     } catch (e) {
@@ -125,62 +127,65 @@ export default function StudentHomePage() {
     }
   };
 
+  // Duplicate Tailwind renderActionButton removed – using project CSS version
+
+  // Mapping friendly status text
+  const STATUS_LABELS = {
+    IDLE: 'Ready to Raise Hand',
+    WAITING: 'Waiting for Faculty Approval',
+    APPROVED: 'Approved – Ready to Start Recording',
+    RECORDING: 'Recording in Progress…',
+    COMPLETED: 'Recording Completed',
+  };
+
+  // Render action button with project CSS classes
   const renderActionButton = () => {
     switch (uiState) {
       case UI_STATES.IDLE:
         return (
-          <button
-            className="bg-primary text-white px-4 py-2 rounded-md"
-            onClick={handleRaiseHand}
-          >
+          <button className="student-btn" onClick={handleRaiseHand}>
             Raise Hand
           </button>
         );
       case UI_STATES.WAITING:
         return (
-          <button
-            className="bg-gray-400 text-white px-4 py-2 rounded-md"
-            onClick={handleCancel}
-          >
+          <button className="student-btn-cancel" onClick={handleCancel}>
             Cancel Hand
           </button>
         );
       case UI_STATES.APPROVED:
         return (
-          <button
-            className="bg-primary text-white px-4 py-2 rounded-md"
-            onClick={handleStartRecording}
-          >
+          <button className="student-btn" onClick={handleStartRecording}>
             Start Recording
           </button>
         );
       case UI_STATES.RECORDING:
         return (
-          <button
-            className="bg-red-600 text-white px-4 py-2 rounded-md"
-            onClick={handleStopRecording}
-          >
+          <button className="student-btn-cancel" onClick={handleStopRecording}>
             Stop Recording
           </button>
         );
       case UI_STATES.COMPLETED:
-        return <span className="text-green-600 font-medium">Done</span>;
+        return <span className="text-success">Done</span>;
       default:
         return null;
     }
   };
 
+  // Loading guard
   if (!student) {
-    return <div className="p-4">Loading student info…</div>;
+    return <div className="loading">Loading student info…</div>;
   }
 
   return (
-    <div className="p-4 max-w-xl mx-auto">
-      <h2 className="text-2xl font-bold mb-2">{student.name}</h2>
-      <p className="mb-2">Roll / ID: {student.studentId || student.id}</p>
-      <p className="mb-4">Token Balance: {balance}</p>
-      <p className="mb-4 font-medium">Status: {uiState}</p>
-      <div>{renderActionButton()}</div>
+    <div className="student-card">
+      <h2 className="student-header">{student.name}</h2>
+      <p className="student-id">
+        Roll / ID: {student.studentIdNumber || student.studentId || student.id}
+      </p>
+      <p className="balance">Token Balance: {balance}</p>
+      <p className="status">Status: {STATUS_LABELS[uiState] || uiState}</p>
+      <div className="action-container">{renderActionButton()}</div>
     </div>
   );
 }

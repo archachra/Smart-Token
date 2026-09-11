@@ -1,9 +1,48 @@
 import express from 'express'
 import pool from './db.js'
+import bcrypt from 'bcrypt'
+import jwt from 'jsonwebtoken'
+import { authenticate, requireRole } from './middleware/auth.js'
 
-const app = express()
-app.use(express.json())
 
+
+const app = express();
+app.use(express.json());
+app.post('/api/auth/login', async (req, res) => {
+  const { email, password } = req.body;
+  if (!email || !password) {
+    return res.status(400).json({ error: 'Missing email or password' });
+  }
+
+  try {
+    const userRes = await pool.query(
+      `SELECT id, email, password_hash, role FROM users WHERE email = $1`,
+      [email]
+    );
+    if (userRes.rowCount === 0) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const user = userRes.rows[0];
+    if (!user.password_hash) {
+      // No password hash stored, treat as invalid credentials
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const match = await bcrypt.compare(password, user.password_hash);
+    if (!match) {
+      return res.status(401).json({ error: 'Invalid credentials' });
+    }
+    const token = jwt.sign(
+      { userId: user.id, role: user.role, email: user.email },
+      process.env.JWT_SECRET || 'dev-secret',
+      { expiresIn: '8h' }
+    );
+    return res.status(200).json({ token });
+  } catch (err) {
+    console.error('Login error:', err);
+    return res.status(500).json({ error: 'Internal server error' });
+  }
+});
+app.use('/api', authenticate);
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ALLOWED_EVENT_TYPES = ['ATTENDANCE', 'PARTICIPATION', 'TOKEN_AWARD', 'CORRECTION']
 
@@ -62,8 +101,9 @@ app.post('/api/events', async (req, res) => {
     eventType,
     description,
     clientEventId,
-    createdBy,
   } = req.body
+  // creator derived from authenticated JWT
+  const createdBy = req.user.userId
 
   // 1. Validate IDs and required fields
   if (!sectionId || !UUID_REGEX.test(sectionId)) {
@@ -195,21 +235,9 @@ app.post('/api/events', async (req, res) => {
 // PATCH /api/sections/:sectionId/students/:studentId/attendance
 app.patch('/api/sections/:sectionId/students/:studentId/attendance', async (req, res) => {
   const { sectionId, studentId } = req.params
-  const { status, clientEventId, createdBy } = req.body
-
-  // 1. Validate UUIDs and attendance status
-  if (!sectionId || !UUID_REGEX.test(sectionId)) {
-    return res.status(400).json({ error: 'Invalid or missing sectionId UUID' })
-  }
-  if (!studentId || !UUID_REGEX.test(studentId)) {
-    return res.status(400).json({ error: 'Invalid or missing studentId UUID' })
-  }
-  if (!clientEventId || !UUID_REGEX.test(clientEventId)) {
-    return res.status(400).json({ error: 'Invalid or missing clientEventId UUID' })
-  }
-  if (!createdBy || !UUID_REGEX.test(createdBy)) {
-    return res.status(400).json({ error: 'Invalid or missing createdBy UUID' })
-  }
+  const { status, clientEventId } = req.body;
+  // creator derived from authenticated JWT
+  const createdBy = req.user.userId;
   if (!status || (status !== 'PRESENT' && status !== 'ABSENT')) {
     return res.status(400).json({ error: 'Attendance status must be "PRESENT" or "ABSENT"' })
   }
@@ -423,7 +451,7 @@ app.get('/api/sections/:sectionId/participation/raised', async (req, res) => {
         rh.raised_at AS "raisedAt"
        FROM raised_hands rh
        JOIN students s ON rh.student_id = s.id
-       WHERE rh.section_id = $1
+       WHERE rh.section_id = $1 AND rh.resolved_at IS NULL
        ORDER BY rh.raised_at ASC`,
       [sectionId]
     )
@@ -452,12 +480,13 @@ app.delete('/api/sections/:sectionId/participation/raised/:requestId', async (re
 
   try {
     // 2. Delete active raised-hand request for specified section
-    const deleteResult = await pool.query(
-      `DELETE FROM raised_hands 
-       WHERE id = $1 AND section_id = $2
-       RETURNING id, section_id AS "sectionId", student_id AS "studentId", raised_at AS "raisedAt"`,
-      [requestId, sectionId]
-    )
+      const deleteResult = await pool.query(
+        `UPDATE raised_hands 
+         SET resolved_at = NOW()
+         WHERE id = $1 AND section_id = $2
+         RETURNING id, section_id AS "sectionId", student_id AS "studentId", raised_at AS "raisedAt", resolved_at AS "resolvedAt"`,
+        [requestId, sectionId]
+      )
 
     // 3. Return 404 if request does not exist in that section
     if (deleteResult.rowCount === 0) {
@@ -523,18 +552,25 @@ app.post('/api/sections/:sectionId/participation/raised/:requestId/approve', asy
 
     // 4. Create APPROVED recording session
     const insertResult = await client.query(
-      `INSERT INTO recording_sessions (section_id, student_id, raised_hand_id, status)
-       VALUES ($1, $2, $3, 'APPROVED')
+      `INSERT INTO recording_sessions (section_id, student_id, raised_hand_id, status, recording_source)
+       VALUES ($1, $2, $3, 'APPROVED', 'STUDENT_DEVICE')
        RETURNING 
         id, 
         section_id AS "sectionId", 
         student_id AS "studentId", 
         raised_hand_id AS "raisedHandId", 
         status, 
+        recording_source, 
         created_at AS "createdAt", 
         started_at AS "startedAt", 
         ended_at AS "endedAt"`,
       [sectionId, studentId, requestId]
+    )
+
+    // Resolve the raised hand so it no longer appears in active queue
+    await client.query(
+      `UPDATE raised_hands SET resolved_at = NOW() WHERE id = $1`,
+      [requestId]
     )
 
     await client.query('COMMIT')

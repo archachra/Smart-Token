@@ -1,6 +1,7 @@
 process.env.NODE_ENV = 'test'
 
 import crypto from 'crypto'
+import jwt from 'jsonwebtoken'
 import pool from './db.js'
 import app from './index.js'
 
@@ -41,12 +42,30 @@ async function runEventsApiTests() {
     )
     const initialBalance = initBalRes.rowCount > 0 ? initBalRes.rows[0].balance : 0
 
+    // Unauthenticated request (should be 401)
+    const unauthRes = await fetch(`${baseUrl}/api/events`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ sectionId, studentId, tokenChange: 1, eventType: 'TOKEN_AWARD', clientEventId: generateUuid(), createdBy }),
+    });
+    if (unauthRes.status !== 401) throw new Error(`Expected 401 for unauthenticated event creation, got ${unauthRes.status}`);
+
+    // Login to obtain JWT for Faculty
+    const loginRes = await fetch(`${baseUrl}/api/auth/login`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email: 'faculty@example.com', password: 'FacultyPass123!' }),
+    });
+    if (loginRes.status !== 200) throw new Error('Login failed for faculty');
+    const { token } = await loginRes.json();
+    const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
+
     // Test 1: Successful Token Award (+2)
     const clientEventId1 = generateUuid()
     console.log(`Test 1: POST /api/events - Successful Token Award (+2)`)
     const res1 = await fetch(`${baseUrl}/api/events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         sectionId,
         studentId,
@@ -76,7 +95,7 @@ async function runEventsApiTests() {
     console.log(`Test 2: POST /api/events - Negative Token Adjustment (-1)`)
     const res2 = await fetch(`${baseUrl}/api/events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         sectionId,
         studentId,
@@ -102,7 +121,7 @@ async function runEventsApiTests() {
     console.log(`Test 3: POST /api/events - Idempotency Check with Duplicate clientEventId`)
     const res3 = await fetch(`${baseUrl}/api/events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         sectionId,
         studentId,
@@ -139,7 +158,7 @@ async function runEventsApiTests() {
     console.log(`Test 4: POST /api/events - Invalid Student/Section Relationship`)
     const res4 = await fetch(`${baseUrl}/api/events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: authHeaders,
       body: JSON.stringify({
         sectionId,
         studentId: unenrolledStudentId,
@@ -162,12 +181,14 @@ async function runEventsApiTests() {
 
     // Test 5: Transaction Failure Handling (FK Violation inside Transaction)
     const fakeCreatedBy = generateUuid() // Non-existent user UUID causes FK constraint failure inside transaction
+    const fakeToken = jwt.sign({ userId: fakeCreatedBy, role: 'FACULTY' }, process.env.JWT_SECRET || 'dev-secret')
+    const fakeAuthHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${fakeToken}` }
     const clientEventIdFail = generateUuid()
 
     console.log(`Test 5: POST /api/events - Transaction Failure & Rollback Handling`)
     const res5 = await fetch(`${baseUrl}/api/events`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers: fakeAuthHeaders,
       body: JSON.stringify({
         sectionId,
         studentId,
