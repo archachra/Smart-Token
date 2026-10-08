@@ -1,3 +1,4 @@
+import './env.js'
 import express from 'express'
 import pool from './db.js'
 import bcrypt from 'bcrypt'
@@ -20,7 +21,14 @@ if (!fs.existsSync(uploadsDir)) {
 const app = express();
 app.use(express.json({ limit: '50mb' }));
 app.use(express.urlencoded({ extended: true, limit: '50mb' }));
-app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads'), {
+  setHeaders: (res, filePath) => {
+    if (filePath.endsWith('.webm')) {
+      res.setHeader('Content-Type', 'audio/webm')
+      res.setHeader('Accept-Ranges', 'bytes')
+    }
+  }
+}));
 app.post('/api/auth/login', async (req, res) => {
   const { email, password } = req.body;
   if (!email || !password) {
@@ -780,6 +788,12 @@ app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/comple
     )
 
     if (savedAudioPath) {
+      await pool.query(
+        `INSERT INTO recording_evaluations (recording_session_id, status)
+         VALUES ($1, 'PENDING')
+         ON CONFLICT (recording_session_id) DO NOTHING`,
+        [recordingId]
+      )
       processRecordingTranscription(recordingId, savedAudioPath).catch((error) => {
         console.error(`Unable to queue transcription for recording ${recordingId}:`, error)
       })
@@ -841,9 +855,10 @@ app.get('/api/sections/:sectionId/students/:studentId/participation/recording', 
       if (assignment.rowCount === 0) return res.status(403).json({ error: 'Forbidden: faculty is not assigned to this section' })
     }
 
-    // 3. Query student's latest active/current recording session in this section
-    const result = await pool.query(
-      `SELECT 
+    // 3. Query student's recording session in this section (supports filtering by raisedHandId and status)
+    const { raisedHandId, status } = req.query || {}
+
+    let queryText = `SELECT 
         id,
         section_id AS "sectionId",
         student_id AS "studentId",
@@ -860,11 +875,25 @@ app.get('/api/sections/:sectionId/students/:studentId/participation/recording', 
         started_at AS "startedAt",
         ended_at AS "endedAt"
        FROM recording_sessions
-       WHERE section_id = $1 AND student_id = $2
-       ORDER BY created_at DESC
-       LIMIT 1`,
-      [sectionId, lookupStudentId]
-    )
+       WHERE section_id = $1 AND student_id = $2`
+    const queryParams = [sectionId, lookupStudentId]
+
+    if (raisedHandId) {
+      if (!UUID_REGEX.test(raisedHandId)) {
+        return res.status(400).json({ error: 'Invalid raisedHandId UUID format' })
+      }
+      queryParams.push(raisedHandId)
+      queryText += ` AND raised_hand_id = $${queryParams.length}`
+    }
+
+    if (status) {
+      queryParams.push(status)
+      queryText += ` AND status = $${queryParams.length}`
+    }
+
+    queryText += ` ORDER BY created_at DESC LIMIT 1`
+
+    const result = await pool.query(queryText, queryParams)
 
     if (result.rowCount === 0) {
       return res.status(200).json({ session: null })

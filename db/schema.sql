@@ -204,5 +204,5 @@ CREATE TABLE recording_evaluations (
     finalized_at TIMESTAMPTZ,
     finalized_event_id UUID UNIQUE REFERENCES events(id),
     CONSTRAINT recording_evaluations_status_check CHECK (status IN ('PENDING', 'PROCESSING', 'COMPLETED', 'FAILED', 'FINALIZED')),
-    CONSTRAINT recording_evaluations_token_change_check CHECK (suggested_token_change IS NULL OR suggested_token_change BETWEEN -1 AND 1)
+    CONSTRAINT recording_evaluations_token_change_check CHECK (suggested_token_change IS NULL OR suggested_token_change BETWEEN -1 AND 3)
 );

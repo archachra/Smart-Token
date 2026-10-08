@@ -140,6 +140,9 @@ async function runGetRaisedHandsApiTests() {
     if (server) {
       server.close()
     }
+    try {
+      await pool.query('DELETE FROM raised_hands WHERE section_id = $1', [sectionId])
+    } catch {}
     await pool.end()
   }
 }
