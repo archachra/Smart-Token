@@ -4,7 +4,7 @@ const mockEvents = [
   {
     id: 1,
     time: 'Today, 2:45 PM',
-    studentName: 'Sarah Chen',
+    studentName: 'Shaurya',
     rollNumber: 'CS101-015',
     type: 'Token Award',
     tokenChange: '+1',
@@ -14,7 +14,7 @@ const mockEvents = [
   {
     id: 2,
     time: 'Today, 2:30 PM',
-    studentName: 'Marcus Vance',
+    studentName: 'Piyush',
     rollNumber: 'CS101-014',
     type: 'Correction',
     tokenChange: '-1',
@@ -26,7 +26,7 @@ const mockEvents = [
   {
     id: 3,
     time: 'Today, 2:15 PM',
-    studentName: 'Marcus Vance',
+    studentName: 'Piyush',
     rollNumber: 'CS101-014',
     type: 'Token Award',
     tokenChange: '+2',
@@ -36,7 +36,7 @@ const mockEvents = [
   {
     id: 4,
     time: 'Today, 1:50 PM',
-    studentName: 'David Kim',
+    studentName: 'Kunal',
     rollNumber: 'CS101-006',
     type: 'Participation',
     tokenChange: '+1',
@@ -46,7 +46,7 @@ const mockEvents = [
   {
     id: 5,
     time: 'Today, 1:30 PM',
-    studentName: 'Alex Johnson',
+    studentName: 'Arnav Chachra',
     rollNumber: 'CS101-001',
     type: 'Correction',
     tokenChange: '0',
@@ -58,7 +58,7 @@ const mockEvents = [
   {
     id: 6,
     time: 'Today, 1:00 PM',
-    studentName: 'Alex Johnson',
+    studentName: 'Arnav Chachra',
     rollNumber: 'CS101-001',
     type: 'Attendance',
     tokenChange: '0',
@@ -68,7 +68,7 @@ const mockEvents = [
   {
     id: 7,
     time: 'Yesterday, 4:20 PM',
-    studentName: 'Emily Rodriguez',
+    studentName: 'Rhythm',
     rollNumber: 'CS101-007',
     type: 'Token Award',
     tokenChange: '+3',
@@ -78,7 +78,7 @@ const mockEvents = [
   {
     id: 8,
     time: 'Yesterday, 3:10 PM',
-    studentName: 'Amanda Foster',
+    studentName: 'Shaurya',
     rollNumber: 'CS101-002',
     type: 'Attendance',
     tokenChange: '0',
@@ -89,12 +89,12 @@ const mockEvents = [
 
 const studentOptions = [
   'All Students',
-  'Alex Johnson',
-  'Amanda Foster',
-  'David Kim',
-  'Emily Rodriguez',
-  'Marcus Vance',
-  'Sarah Chen',
+  'Arnav Chachra',
+  'Shaurya',
+  'Kunal',
+  'Rhythm',
+  'Piyush',
+  'Aditya Gupta',
 ]
 
 const eventTypeOptions = [

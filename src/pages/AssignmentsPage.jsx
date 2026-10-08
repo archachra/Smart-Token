@@ -3,7 +3,7 @@ import { useState } from 'react'
 const initialSubmissions = [
   {
     id: 1,
-    studentName: 'Alex Johnson',
+    studentName: 'Arnav Chachra',
     rollNumber: 'CS101-001',
     assignmentName: 'Lab 3: Binary Search Trees',
     status: 'Pending',
@@ -14,7 +14,7 @@ const initialSubmissions = [
   },
   {
     id: 2,
-    studentName: 'Sarah Chen',
+    studentName: 'Shaurya',
     rollNumber: 'CS101-015',
     assignmentName: 'Lab 3: Binary Search Trees',
     status: 'Pending',
@@ -25,7 +25,7 @@ const initialSubmissions = [
   },
   {
     id: 3,
-    studentName: 'Marcus Vance',
+    studentName: 'Piyush',
     rollNumber: 'CS101-014',
     assignmentName: 'Homework 2: Big-O Proofs',
     status: 'Pending',
@@ -36,7 +36,7 @@ const initialSubmissions = [
   },
   {
     id: 4,
-    studentName: 'Emily Rodriguez',
+    studentName: 'Rhythm',
     rollNumber: 'CS101-007',
     assignmentName: 'Lab 3: Binary Search Trees',
     status: 'Approved',
@@ -47,7 +47,7 @@ const initialSubmissions = [
   },
   {
     id: 5,
-    studentName: 'David Kim',
+    studentName: 'Kunal',
     rollNumber: 'CS101-006',
     assignmentName: 'Homework 2: Big-O Proofs',
     status: 'Pending',

@@ -1,9 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { get, post, patch, del } from '../utils/api.js';
 
-// Hard‑coded demo IDs – replace with real auth values later
 const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7';
-const STUDENT_ID = '68bf0413-6cf3-41ef-8bb7-613fbaa49198';
 
 const UI_STATES = {
   IDLE: 'IDLE',
@@ -14,7 +13,9 @@ const UI_STATES = {
 };
 
 export default function StudentHomePage() {
+  const navigate = useNavigate();
   const [student, setStudent] = useState(null);
+  const [studentId, setStudentId] = useState(null);
   const [balance, setBalance] = useState(0);
   const [uiState, setUiState] = useState(UI_STATES.IDLE);
   const [raisedHandId, setRaisedHandId] = useState(null);
@@ -38,10 +39,27 @@ export default function StudentHomePage() {
       try {
         const data = await get(`/api/sections/${SECTION_ID}/students`);
         const roster = data.students || [];
-        const me = roster.find((s) => s.id === STUDENT_ID);
+        const token = localStorage.getItem('smarttoken_token');
+        const payload = token ? JSON.parse(atob(token.split('.')[1].replace(/-/g, '+').replace(/_/g, '/'))) : {};
+        const me = roster.find((s) => s.userId === payload.userId);
         if (me) {
+          setStudentId(me.id);
           setStudent(me);
           setBalance(me.balance);
+          const current = await get(`/api/sections/${SECTION_ID}/students/${me.id}/participation/recording`);
+          if (current.session) {
+            const session = current.session;
+            setRecordingId(session.id);
+            setTopic(session.topic || '');
+            setExtraInfo(session.extraInfo || '');
+            setAudioUrl(session.audioUrl || null);
+            setTranscript(session.transcript || null);
+            setTranscriptionStatus(session.transcriptionStatus || null);
+            setTranscriptionError(session.transcriptionError || null);
+            if (session.status === 'APPROVED') setUiState(UI_STATES.APPROVED);
+            if (session.status === 'RECORDING') setUiState(UI_STATES.RECORDING);
+            if (session.status === 'COMPLETED') setUiState(UI_STATES.COMPLETED);
+          }
         }
       } catch (e) {
         console.error('Failed to load roster', e);
@@ -61,10 +79,11 @@ export default function StudentHomePage() {
   }, []);
 
   const startPolling = () => {
-    pollTimer.current = setInterval(async () => {
+    if (pollTimer.current) clearInterval(pollTimer.current)
+    const pollForApproval = async () => {
       try {
         const resp = await get(
-          `/api/sections/${SECTION_ID}/students/${STUDENT_ID}/participation/recording`
+          `/api/sections/${SECTION_ID}/students/${studentId}/participation/recording`
         );
         if (resp.session) {
           const { id, status, topic: t, extraInfo: ei, audioUrl: au, transcript: text, transcriptionStatus: ts, transcriptionError: te } = resp.session;
@@ -89,15 +108,18 @@ export default function StudentHomePage() {
       } catch (e) {
         console.error('Polling error', e);
       }
-    }, 2500);
+    }
+    pollForApproval()
+    pollTimer.current = setInterval(pollForApproval, 2500)
   };
 
   const handleRaiseHand = async () => {
+    if (!studentId) return;
     try {
       setMicError(null);
       const resp = await post(
         `/api/sections/${SECTION_ID}/participation/raise`,
-        { studentId: STUDENT_ID }
+        { studentId }
       );
       setRaisedHandId(resp.request.id);
       setUiState(UI_STATES.WAITING);
@@ -199,10 +221,37 @@ export default function StudentHomePage() {
           return;
         }
         setUiState(UI_STATES.COMPLETED);
+        // Keep polling after upload so ASR/Gemini terminal status reaches the UI.
+        startPolling();
       };
     } catch (e) {
       console.error('Stop recording error', e);
     }
+  };
+
+  const handleBackToParticipation = () => {
+    if (pollTimer.current) {
+      clearInterval(pollTimer.current);
+      pollTimer.current = null;
+    }
+    setUiState(UI_STATES.IDLE);
+    setRaisedHandId(null);
+    setRecordingId(null);
+    setTopic('');
+    setExtraInfo('');
+    setAudioUrl(null);
+    setTranscript(null);
+    setTranscriptionStatus(null);
+    setTranscriptionError(null);
+    navigate('/student');
+  };
+
+  const handleLogout = () => {
+    if (mediaStreamRef.current) {
+      mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+    }
+    localStorage.removeItem('smarttoken_token');
+    navigate('/login');
   };
 
   // Mapping friendly status text
@@ -255,6 +304,9 @@ export default function StudentHomePage() {
 
   return (
     <div className="student-card">
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+        <button className="student-btn-cancel" onClick={handleLogout}>Logout</button>
+      </div>
       <h2 className="student-header">{student.name}</h2>
       <p className="student-id">
         Roll / ID: {student.studentIdNumber || student.studentId || student.id}
@@ -276,7 +328,14 @@ export default function StudentHomePage() {
         </div>
       )}
 
-      <div className="action-container">{renderActionButton()}</div>
+      <div className="action-container">
+        {renderActionButton()}
+        {uiState === UI_STATES.COMPLETED && (
+          <button className="student-btn" onClick={handleBackToParticipation} style={{ marginLeft: '0.75rem' }}>
+            Back to Participation
+          </button>
+        )}
+      </div>
 
       {audioUrl && (uiState === UI_STATES.COMPLETED || uiState === UI_STATES.RECORDING) && (
         <div style={{ marginTop: '1.25rem', paddingTop: '1rem', borderTop: '1px solid #e2e8f0', textAlign: 'left' }}>
@@ -285,14 +344,6 @@ export default function StudentHomePage() {
         </div>
       )}
 
-      {uiState === UI_STATES.COMPLETED && transcriptionStatus && (
-        <div style={{ marginTop: '1rem', textAlign: 'left' }}>
-          <h4>Transcript</h4>
-          {transcriptionStatus === 'COMPLETED' && <p>{transcript}</p>}
-          {transcriptionStatus === 'PENDING' || transcriptionStatus === 'PROCESSING' ? <p>Transcription is processing…</p> : null}
-          {transcriptionStatus === 'FAILED' && <p style={{ color: '#dc2626' }}>Transcription failed: {transcriptionError || 'Please try again later.'}</p>}
-        </div>
-      )}
     </div>
   );
 }

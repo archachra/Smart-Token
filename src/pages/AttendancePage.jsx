@@ -1,25 +1,21 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { ATTENDANCE_STORAGE_KEY, createDemoRoster } from '../data/demoStudents'
 
-const initialRoster = [
-  { id: 1, rollNumber: 'CS101-001', name: 'Alex Johnson', isPresent: true },
-  { id: 2, rollNumber: 'CS101-002', name: 'Amanda Foster', isPresent: true },
-  { id: 3, rollNumber: 'CS101-003', name: 'Benjamin Lee', isPresent: true },
-  { id: 4, rollNumber: 'CS101-004', name: 'Catherine Zhang', isPresent: true },
-  { id: 5, rollNumber: 'CS101-005', name: 'Daniel Smith', isPresent: true },
-  { id: 6, rollNumber: 'CS101-006', name: 'David Kim', isPresent: true },
-  { id: 7, rollNumber: 'CS101-007', name: 'Emily Rodriguez', isPresent: true },
-  { id: 8, rollNumber: 'CS101-008', name: 'Grace Hopper', isPresent: true },
-  { id: 9, rollNumber: 'CS101-009', name: 'Hannah Abbott', isPresent: true },
-  { id: 10, rollNumber: 'CS101-010', name: 'Ian Malcolm', isPresent: true },
-  { id: 11, rollNumber: 'CS101-011', name: 'Jacob Miller', isPresent: true },
-  { id: 12, rollNumber: 'CS101-012', name: 'Jessica Davis', isPresent: true },
-  { id: 13, rollNumber: 'CS101-013', name: 'Liam Wilson', isPresent: true },
-  { id: 14, rollNumber: 'CS101-014', name: 'Marcus Vance', isPresent: true },
-  { id: 15, rollNumber: 'CS101-015', name: 'Sarah Chen', isPresent: true },
-]
+const initialRoster = createDemoRoster()
 
 export default function AttendancePage() {
-  const [students, setStudents] = useState(initialRoster)
+  const [students, setStudents] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ATTENDANCE_STORAGE_KEY))
+      return Array.isArray(saved) && saved.length === initialRoster.length ? saved : initialRoster
+    } catch {
+      return initialRoster
+    }
+  })
+
+  useEffect(() => {
+    localStorage.setItem(ATTENDANCE_STORAGE_KEY, JSON.stringify(students))
+  }, [students])
 
   const toggleAttendance = (id) => {
     setStudents((prev) =>

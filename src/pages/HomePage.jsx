@@ -1,19 +1,19 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
+import { ATTENDANCE_STORAGE_KEY, createDemoRoster } from '../data/demoStudents'
 
-const initialStudents = [
-  { id: 1, name: 'Alex Johnson', seat: 'Row 1 • Seat 3', tokens: 4, initials: 'AJ', color: '#2563eb' },
-  { id: 2, name: 'Sarah Chen', seat: 'Row 2 • Seat 5', tokens: 7, initials: 'SC', color: '#059669' },
-  { id: 3, name: 'Marcus Vance', seat: 'Row 1 • Seat 1', tokens: 3, initials: 'MV', color: '#d97706' },
-  { id: 4, name: 'Emily Rodriguez', seat: 'Row 3 • Seat 2', tokens: 5, initials: 'ER', color: '#7c3aed' },
-  { id: 5, name: 'David Kim', seat: 'Row 2 • Seat 4', tokens: 2, initials: 'DK', color: '#db2777' },
-]
+const initialStudents = createDemoRoster().map((student, index) => ({
+  ...student,
+  tokens: [4, 7, 3, 5, 2][index] || 0,
+  initials: student.name.split(' ').map((part) => part[0]).join('').slice(0, 2),
+  color: ['#2563eb', '#059669', '#d97706', '#7c3aed', '#db2777'][index % 5],
+}))
 
 const initialActivities = [
-  { id: 1, type: 'token', text: 'Sarah Chen was awarded +1 Token for Insightful Answer', time: '2 mins ago', icon: '🪙' },
-  { id: 2, type: 'queue', text: 'Marcus Vance joined speaker queue', time: '7 mins ago', icon: '✋' },
-  { id: 3, type: 'attendance', text: 'David Kim marked Present', time: '15 mins ago', icon: '📋' },
-  { id: 4, type: 'token', text: 'Alex Johnson was awarded +1 Token for Code Walkthrough', time: '35 mins ago', icon: '🪙' },
-  { id: 5, type: 'assignment', text: 'Emily Rodriguez submitted Lab 3 Solution', time: '1 hr ago', icon: '📝' },
+  { id: 1, type: 'token', text: 'Shaurya was awarded +1 Token for Insightful Answer', time: '2 mins ago', icon: '🪙' },
+  { id: 2, type: 'queue', text: 'Piyush joined speaker queue', time: '7 mins ago', icon: '✋' },
+  { id: 3, type: 'attendance', text: 'Rhythm marked Present', time: '15 mins ago', icon: '📋' },
+  { id: 4, type: 'token', text: 'Arnav Chachra was awarded +1 Token for Code Walkthrough', time: '35 mins ago', icon: '🪙' },
+  { id: 5, type: 'assignment', text: 'Kunal submitted Lab 3 Solution', time: '1 hr ago', icon: '📝' },
 ]
 
 export default function HomePage() {
@@ -21,6 +21,27 @@ export default function HomePage() {
   const [activities, setActivities] = useState(initialActivities)
   const [feedback, setFeedback] = useState(null)
   const [tokensToday, setTokensToday] = useState(18)
+  const [presentCount, setPresentCount] = useState(() => {
+    try {
+      const saved = JSON.parse(localStorage.getItem(ATTENDANCE_STORAGE_KEY))
+      return Array.isArray(saved) ? saved.filter((student) => student.isPresent).length : initialStudents.length
+    } catch {
+      return initialStudents.length
+    }
+  })
+
+  useEffect(() => {
+    const refreshAttendance = () => {
+      try {
+        const saved = JSON.parse(localStorage.getItem(ATTENDANCE_STORAGE_KEY))
+        setPresentCount(Array.isArray(saved) ? saved.filter((student) => student.isPresent).length : initialStudents.length)
+      } catch {
+        setPresentCount(initialStudents.length)
+      }
+    }
+    window.addEventListener('storage', refreshAttendance)
+    return () => window.removeEventListener('storage', refreshAttendance)
+  }, [])
 
   const handleAddToken = (student) => {
     // Increment student token count
@@ -70,7 +91,7 @@ export default function HomePage() {
             <span>📋</span>
           </div>
           <div className="status-info">
-            <span className="status-value">42 / 45</span>
+            <span className="status-value">{presentCount} / {students.length}</span>
             <span className="status-title">Present Today</span>
           </div>
         </div>
@@ -112,7 +133,7 @@ export default function HomePage() {
         </div>
 
         <div className="student-grid">
-          {students.map((student) => (
+          {students.slice(0, 5).map((student) => (
             <div key={student.id} className="student-card">
               <div className="student-header">
                 <div
@@ -123,7 +144,6 @@ export default function HomePage() {
                 </div>
                 <div className="student-details">
                   <h4 className="student-name">{student.name}</h4>
-                  <span className="student-seat">{student.seat}</span>
                 </div>
               </div>
 

@@ -1,25 +1,38 @@
 import { useState } from 'react'
+import { DEMO_STUDENT_NAMES } from '../data/demoStudents'
 
 const initialStudents = [
-  { id: 1, rollNumber: 'CS101-001', name: 'Alex Johnson', seat: 'Row 1 • Seat 3', tokens: 4, initials: 'AJ', color: '#2563eb', isRecent: true },
-  { id: 2, rollNumber: 'CS101-002', name: 'Amanda Foster', seat: 'Row 3 • Seat 1', tokens: 3, initials: 'AF', color: '#0284c7', isRecent: false },
-  { id: 3, rollNumber: 'CS101-003', name: 'Benjamin Lee', seat: 'Row 2 • Seat 2', tokens: 5, initials: 'BL', color: '#059669', isRecent: false },
-  { id: 4, rollNumber: 'CS101-004', name: 'Catherine Zhang', seat: 'Row 4 • Seat 4', tokens: 2, initials: 'CZ', color: '#7c3aed', isRecent: false },
-  { id: 5, rollNumber: 'CS101-005', name: 'Daniel Smith', seat: 'Row 1 • Seat 5', tokens: 1, initials: 'DS', color: '#d97706', isRecent: false },
-  { id: 6, rollNumber: 'CS101-006', name: 'David Kim', seat: 'Row 2 • Seat 4', tokens: 2, initials: 'DK', color: '#db2777', isRecent: true },
-  { id: 7, rollNumber: 'CS101-007', name: 'Emily Rodriguez', seat: 'Row 3 • Seat 2', tokens: 5, initials: 'ER', color: '#65a30d', isRecent: true },
-  { id: 8, rollNumber: 'CS101-008', name: 'Grace Hopper', seat: 'Row 1 • Seat 2', tokens: 6, initials: 'GH', color: '#0891b2', isRecent: false },
-  { id: 9, rollNumber: 'CS101-009', name: 'Hannah Abbott', seat: 'Row 4 • Seat 1', tokens: 3, initials: 'HA', color: '#4f46e5', isRecent: false },
-  { id: 10, rollNumber: 'CS101-010', name: 'Ian Malcolm', seat: 'Row 2 • Seat 3', tokens: 4, initials: 'IM', color: '#ca8a04', isRecent: false },
-  { id: 11, rollNumber: 'CS101-011', name: 'Jacob Miller', seat: 'Row 3 • Seat 5', tokens: 1, initials: 'JM', color: '#9333ea', isRecent: false },
-  { id: 12, rollNumber: 'CS101-012', name: 'Jessica Davis', seat: 'Row 1 • Seat 4', tokens: 3, initials: 'JD', color: '#e11d48', isRecent: false },
-  { id: 13, rollNumber: 'CS101-013', name: 'Liam Wilson', seat: 'Row 4 • Seat 2', tokens: 2, initials: 'LW', color: '#2563eb', isRecent: false },
-  { id: 14, rollNumber: 'CS101-014', name: 'Marcus Vance', seat: 'Row 1 • Seat 1', tokens: 3, initials: 'MV', color: '#d97706', isRecent: true },
-  { id: 15, rollNumber: 'CS101-015', name: 'Sarah Chen', seat: 'Row 2 • Seat 5', tokens: 7, initials: 'SC', color: '#059669', isRecent: true },
+  { id: 1, rollNumber: 'CS101-001', name: 'Arnav Chachra', seat: 'Row 1 • Seat 3', tokens: 4, initials: 'AC', color: '#2563eb', isRecent: true },
+  { id: 2, rollNumber: 'CS101-002', name: 'Shaurya', seat: 'Row 3 • Seat 1', tokens: 3, initials: 'S', color: '#0284c7', isRecent: false },
+  { id: 3, rollNumber: 'CS101-003', name: 'Piyush', seat: 'Row 2 • Seat 2', tokens: 5, initials: 'P', color: '#059669', isRecent: false },
+  { id: 4, rollNumber: 'CS101-004', name: 'Rhythm', seat: 'Row 4 • Seat 4', tokens: 2, initials: 'R', color: '#7c3aed', isRecent: false },
+  { id: 5, rollNumber: 'CS101-005', name: 'Kunal', seat: 'Row 1 • Seat 5', tokens: 1, initials: 'K', color: '#d97706', isRecent: false },
+  { id: 6, rollNumber: 'CS101-006', name: 'Aditya Gupta', seat: 'Row 2 • Seat 4', tokens: 2, initials: 'AG', color: '#db2777', isRecent: true },
+  { id: 7, rollNumber: 'CS101-007', name: 'Arjan Singh Sawhney', seat: 'Row 3 • Seat 2', tokens: 5, initials: 'AS', color: '#65a30d', isRecent: true },
+  { id: 8, rollNumber: 'CS101-008', name: 'Ashmeen Kaur', seat: 'Row 1 • Seat 2', tokens: 6, initials: 'AK', color: '#0891b2', isRecent: false },
+  { id: 9, rollNumber: 'CS101-009', name: 'Charvi', seat: 'Row 4 • Seat 1', tokens: 3, initials: 'C', color: '#4f46e5', isRecent: false },
+  { id: 10, rollNumber: 'CS101-010', name: 'Gagandeep Kaur', seat: 'Row 2 • Seat 3', tokens: 4, initials: 'GK', color: '#ca8a04', isRecent: false },
+  { id: 11, rollNumber: 'CS101-011', name: 'Jaskaran Singh', seat: 'Row 3 • Seat 5', tokens: 1, initials: 'JS', color: '#9333ea', isRecent: false },
+  { id: 12, rollNumber: 'CS101-012', name: 'Jasroop', seat: 'Row 1 • Seat 4', tokens: 3, initials: 'J', color: '#e11d48', isRecent: false },
+  { id: 13, rollNumber: 'CS101-013', name: 'Kanishak', seat: 'Row 4 • Seat 2', tokens: 2, initials: 'K', color: '#2563eb', isRecent: false },
+  { id: 14, rollNumber: 'CS101-014', name: 'Kashish Kannojiya', seat: 'Row 1 • Seat 1', tokens: 3, initials: 'KK', color: '#d97706', isRecent: true },
+  { id: 15, rollNumber: 'CS101-015', name: 'Khushi', seat: 'Row 2 • Seat 5', tokens: 7, initials: 'K', color: '#059669', isRecent: true },
 ]
 
+const orderedStudents = DEMO_STUDENT_NAMES.map((name, index) =>
+  initialStudents.find((student) => student.name === name) || {
+    id: index + 1,
+    rollNumber: `CS101-${String(index + 1).padStart(3, '0')}`,
+    name,
+    tokens: 0,
+    initials: name.split(' ').map((part) => part[0]).join('').slice(0, 2),
+    color: '#64748b',
+    isRecent: false,
+  }
+)
+
 export default function QuickTokenPage() {
-  const [students, setStudents] = useState(initialStudents)
+  const [students, setStudents] = useState(orderedStudents)
   const [searchQuery, setSearchQuery] = useState('')
 
   // Calculate total classroom tokens dynamically
@@ -44,7 +57,8 @@ export default function QuickTokenPage() {
       s.rollNumber.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const recentStudents = students.filter((s) => s.isRecent)
+  // Keep the quick-access cards aligned with the required demo roster order.
+  const recentStudents = students.slice(0, 5)
 
   return (
     <div className="quick-token-container">

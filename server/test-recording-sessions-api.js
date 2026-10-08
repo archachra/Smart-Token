@@ -153,6 +153,13 @@ async function runRecordingSessionsApiTests() {
     }
     console.log('✅ Test 4 PASSED: Student recording session retrieved successfully.\n')
 
+    // Student polling may carry a stale/demo path ID; ownership must come from JWT.
+    const stalePathRes = await fetch(`${baseUrl}/api/sections/${sectionId}/students/68bf0413-6cf3-41ef-8bb7-613fbaa49198/participation/recording`, {
+      headers: { Authorization: `Bearer ${studentToken}` },
+    })
+    if (stalePathRes.status !== 200) throw new Error(`Expected JWT-owned polling lookup to return 200, got ${stalePathRes.status}`)
+    console.log('✅ Test 4b PASSED: Student polling resolves ownership from JWT.\n')
+
     // Test 5: Invalid Start State (Complete before Start)
     console.log(`Test 5: Invalid State Transition (Complete session while APPROVED)`)
     const res5 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/recordings/${recordingId}/complete`, {

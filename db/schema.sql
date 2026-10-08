@@ -146,7 +146,6 @@ CREATE TABLE raised_hands (
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     raised_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     resolved_at TIMESTAMPTZ,
-    CONSTRAINT unique_active_raised_hand UNIQUE (section_id, student_id)
 );
 
 -- 10. Recording Sessions Table (Participation Workflow State)
@@ -182,6 +181,7 @@ CREATE INDEX idx_events_student_id ON events(student_id);
 CREATE INDEX idx_events_created_by ON events(created_by);
 CREATE INDEX idx_events_correction_of ON events(correction_of);
 CREATE INDEX idx_raised_hands_section_raised_at ON raised_hands(section_id, raised_at ASC);
+CREATE UNIQUE INDEX unique_active_raised_hand ON raised_hands(section_id, student_id) WHERE resolved_at IS NULL;
 CREATE INDEX idx_recording_sessions_section_id ON recording_sessions(section_id);
 CREATE INDEX idx_recording_sessions_student_id ON recording_sessions(student_id);
 CREATE INDEX idx_recording_sessions_raised_hand_id ON recording_sessions(raised_hand_id);
