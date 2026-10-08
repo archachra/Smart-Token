@@ -56,6 +56,12 @@ export async function processRecordingTranscription(recordingId, filePath) {
        WHERE id = $1`,
       [recordingId, transcript]
     )
+    await pool.query(
+      `INSERT INTO recording_evaluations (recording_session_id, status)
+       VALUES ($1, 'PENDING')
+       ON CONFLICT (recording_session_id) DO NOTHING`,
+      [recordingId]
+    )
     queueRecordingEvaluation(recordingId)
   } catch (error) {
     console.error(`Transcription failed for recording ${recordingId}:`, error)

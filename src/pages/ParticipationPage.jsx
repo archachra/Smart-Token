@@ -298,7 +298,12 @@ export default function ParticipationPage() {
                 ) : (
                   <p style={{ margin: '0.35rem 0 0', color: '#64748b' }}>Transcription processing…</p>
                 )}
-                {recording.evaluationStatus === 'COMPLETED' && (
+                {(!recording.evaluationStatus || recording.evaluationStatus === 'PENDING' || recording.evaluationStatus === 'PROCESSING') && (
+                  <p style={{ margin: '0.35rem 0 0', color: '#64748b', fontSize: '0.85rem' }}>
+                    {recording.transcriptionStatus === 'COMPLETED' ? 'Evaluation processing…' : 'Waiting for transcript to evaluate…'}
+                  </p>
+                )}
+                {(recording.evaluationStatus === 'COMPLETED' || recording.evaluationStatus === 'FINALIZED') && (
                   <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: '#f8fafc' }}>
                     <strong>AI suggestion (faculty review required)</strong>
                     <div>{recording.evaluationRelevant ? 'Relevant' : 'Not relevant'} · {recording.evaluationCorrect ? 'Correct' : 'Needs improvement'}</div>
@@ -310,7 +315,7 @@ export default function ParticipationPage() {
                       <div style={{ marginTop: '0.5rem' }}>
                         <button className="recording-action-btn start" onClick={() => finalizeEvaluation(recording, recording.suggestedTokenChange)}>Approve Suggestion</button>
                         <select value={finalChanges[recording.id] ?? recording.suggestedTokenChange} onChange={(e) => setFinalChanges((prev) => ({ ...prev, [recording.id]: Number(e.target.value) }))} style={{ marginLeft: '0.5rem' }}>
-                          <option value="-1">-1</option><option value="0">0</option><option value="1">+1</option>
+                          <option value="-1">-1</option><option value="0">0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option>
                         </select>
                         <button className="recording-action-btn start" onClick={() => finalizeEvaluation(recording, finalChanges[recording.id] ?? recording.suggestedTokenChange)} style={{ marginLeft: '0.5rem' }}>Finalize Edited</button>
                         {finalizeErrors[recording.id] && <div style={{ color: '#dc2626' }}>{finalizeErrors[recording.id]}</div>}
@@ -318,7 +323,7 @@ export default function ParticipationPage() {
                     )}
                   </div>
                 )}
-                {recording.evaluationStatus === 'FAILED' && <p style={{ color: '#dc2626' }}>AI evaluation failed; no token change was made.</p>}
+                {recording.evaluationStatus === 'FAILED' && <p style={{ color: '#dc2626', fontSize: '0.85rem', margin: '0.35rem 0 0' }}>AI evaluation failed; no token change was made.</p>}
               </div>
             ))}
           </div>

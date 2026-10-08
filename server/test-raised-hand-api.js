@@ -1,6 +1,7 @@
 process.env.NODE_ENV = 'test'
 
 import crypto from 'crypto'
+import jwt from 'jsonwebtoken'
 import pool from './db.js'
 import app from './index.js'
 
@@ -23,7 +24,10 @@ async function runRaisedHandApiTests() {
 
     // Fetch valid seed IDs from DB
     const sectionRes = await pool.query(`SELECT id FROM sections LIMIT 1`)
-    const studentRes = await pool.query(`SELECT id FROM students LIMIT 1`)
+    const studentRes = await pool.query(
+      `SELECT s.id FROM students s JOIN users u ON u.id = s.user_id
+       WHERE u.email = 'student@example.com' LIMIT 1`
+    )
 
     if (sectionRes.rowCount === 0 || studentRes.rowCount === 0) {
       throw new Error('Seed data missing. Run db/verify.js first!')
@@ -98,7 +102,8 @@ async function runRaisedHandApiTests() {
       `SELECT COALESCE(balance, 0) AS balance FROM student_balances WHERE student_id = $1 AND section_id = $2`,
       [studentId, sectionId]
     )
-    if (postBalRes.rows[0].balance !== initialBalance) {
+    const postBalance = postBalRes.rowCount > 0 ? postBalRes.rows[0].balance : 0
+    if (postBalance !== initialBalance) {
       throw new Error('FAIL: student_balances balance was modified! Raised hands must not alter balances.')
     }
 
@@ -135,10 +140,16 @@ async function runRaisedHandApiTests() {
     )
     const unenrolledStudentId = dummyStudentRes.rows[0].id
 
+    const unenrolledToken = jwt.sign(
+      { userId: dummyUserRes.rows[0].id, role: 'STUDENT', email: dummyUserRes.rows[0].email },
+      process.env.JWT_SECRET || 'dev-secret'
+    )
+    const unenrolledHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${unenrolledToken}` }
+
     console.log(`Test 3: Invalid Enrollment (Unenrolled Student)`)
     const res3 = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raise`, {
       method: 'POST',
-      headers: authHeaders,
+      headers: unenrolledHeaders,
       body: JSON.stringify({
         studentId: unenrolledStudentId,
       }),
