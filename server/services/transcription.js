@@ -2,21 +2,21 @@ import fs from 'fs/promises'
 import pool from '../db.js'
 import { queueRecordingEvaluation } from './evaluation.js'
 
-const OPENAI_TRANSCRIPTION_URL = 'https://api.openai.com/v1/audio/transcriptions'
+const GROQ_TRANSCRIPTION_URL = 'https://api.groq.com/openai/v1/audio/transcriptions'
 
-export async function transcribeAudioFile(filePath) {
-  const apiKey = process.env.OPENAI_API_KEY
+export async function transcribeAudioFile(filePath, fetchImpl = fetch) {
+  const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) {
-    throw new Error('OPENAI_API_KEY is not configured')
+    throw new Error('GROQ_API_KEY is not configured')
   }
 
   const audioBuffer = await fs.readFile(filePath)
   const form = new FormData()
   form.append('file', new Blob([audioBuffer], { type: 'audio/webm' }), 'recording.webm')
-  form.append('model', process.env.OPENAI_TRANSCRIPTION_MODEL || 'gpt-4o-mini-transcribe')
+  form.append('model', process.env.GROQ_TRANSCRIPTION_MODEL || 'whisper-large-v3-turbo')
   form.append('response_format', 'json')
 
-  const response = await fetch(OPENAI_TRANSCRIPTION_URL, {
+  const response = await fetchImpl(GROQ_TRANSCRIPTION_URL, {
     method: 'POST',
     headers: { Authorization: `Bearer ${apiKey}` },
     body: form,

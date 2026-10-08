@@ -83,6 +83,7 @@ app.get('/api/sections/:sectionId/students', async (req, res) => {
     const studentsResult = await pool.query(
       `SELECT 
         s.id,
+        s.user_id AS "userId",
         s.name,
         s.student_id_number AS "studentIdNumber",
         COALESCE(sb.balance, 0) AS balance
@@ -408,7 +409,7 @@ app.post('/api/sections/:sectionId/participation/raise', async (req, res) => {
 
     // 3. Check for existing active raised-hand request to prevent duplicates
     const existingCheck = await pool.query(
-      `SELECT id FROM raised_hands WHERE section_id = $1 AND student_id = $2`,
+      `SELECT id FROM raised_hands WHERE section_id = $1 AND student_id = $2 AND resolved_at IS NULL`,
       [sectionId, studentId]
     )
 
@@ -816,10 +817,17 @@ app.get('/api/sections/:sectionId/students/:studentId/participation/recording', 
       return res.status(404).json({ error: 'Section not found' })
     }
 
+    let lookupStudentId = studentId
+    if (req.user.role === 'STUDENT') {
+      const identity = await pool.query(`SELECT id FROM students WHERE user_id = $1`, [req.user.userId])
+      if (identity.rowCount === 0) return res.status(403).json({ error: 'Authenticated user is not a student' })
+      lookupStudentId = identity.rows[0].id
+    }
+
     const ownerCheck = await pool.query(
       `SELECT s.user_id AS "studentUserId"
        FROM students s WHERE s.id = $1`,
-      [studentId]
+      [lookupStudentId]
     )
     if (ownerCheck.rowCount === 0) return res.status(404).json({ error: 'Student not found' })
     if (req.user.role === 'STUDENT' && req.user.userId !== ownerCheck.rows[0].studentUserId) {
@@ -855,7 +863,7 @@ app.get('/api/sections/:sectionId/students/:studentId/participation/recording', 
        WHERE section_id = $1 AND student_id = $2
        ORDER BY created_at DESC
        LIMIT 1`,
-      [sectionId, studentId]
+      [sectionId, lookupStudentId]
     )
 
     if (result.rowCount === 0) {
