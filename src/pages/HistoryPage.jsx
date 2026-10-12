@@ -1,101 +1,7 @@
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
+import { get } from '../utils/api.js'
 
-const mockEvents = [
-  {
-    id: 1,
-    time: 'Today, 2:45 PM',
-    studentName: 'Shaurya',
-    rollNumber: 'CS101-015',
-    type: 'Token Award',
-    tokenChange: '+1',
-    description: 'Awarded token for Quick Token response in class',
-    isCorrection: false,
-  },
-  {
-    id: 2,
-    time: 'Today, 2:30 PM',
-    studentName: 'Piyush',
-    rollNumber: 'CS101-014',
-    type: 'Correction',
-    tokenChange: '-1',
-    description: 'Corrected accidental duplicate token award',
-    isCorrection: true,
-    originalAction: 'Original Action: Awarded +2 Tokens for Q2 answer at 2:15 PM',
-    correctionNote: 'Correction Applied: Deducted -1 Token (Adjusted Total: +1 Token)',
-  },
-  {
-    id: 3,
-    time: 'Today, 2:15 PM',
-    studentName: 'Piyush',
-    rollNumber: 'CS101-014',
-    type: 'Token Award',
-    tokenChange: '+2',
-    description: 'Awarded tokens for Q2 classroom presentation',
-    isCorrection: false,
-  },
-  {
-    id: 4,
-    time: 'Today, 1:50 PM',
-    studentName: 'Kunal',
-    rollNumber: 'CS101-006',
-    type: 'Participation',
-    tokenChange: '+1',
-    description: 'Recorded live speech participation during discussion',
-    isCorrection: false,
-  },
-  {
-    id: 5,
-    time: 'Today, 1:30 PM',
-    studentName: 'Arnav Chachra',
-    rollNumber: 'CS101-001',
-    type: 'Correction',
-    tokenChange: '0',
-    description: 'Corrected initial roll call attendance status',
-    isCorrection: true,
-    originalAction: 'Original Action: Marked Absent at 1:00 PM',
-    correctionNote: 'Correction Applied: Updated status to Present (Late Arrival)',
-  },
-  {
-    id: 6,
-    time: 'Today, 1:00 PM',
-    studentName: 'Arnav Chachra',
-    rollNumber: 'CS101-001',
-    type: 'Attendance',
-    tokenChange: '0',
-    description: 'Marked Absent during initial class roll call',
-    isCorrection: false,
-  },
-  {
-    id: 7,
-    time: 'Yesterday, 4:20 PM',
-    studentName: 'Rhythm',
-    rollNumber: 'CS101-007',
-    type: 'Token Award',
-    tokenChange: '+3',
-    description: 'Approved Lab 3 submission token reward',
-    isCorrection: false,
-  },
-  {
-    id: 8,
-    time: 'Yesterday, 3:10 PM',
-    studentName: 'Shaurya',
-    rollNumber: 'CS101-002',
-    type: 'Attendance',
-    tokenChange: '0',
-    description: 'Marked Present during class roll call',
-    isCorrection: false,
-  },
-]
-
-const studentOptions = [
-  'All Students',
-  'Arnav Chachra',
-  'Shaurya',
-  'Kunal',
-  'Rhythm',
-  'Piyush',
-  'Aditya Gupta',
-]
+const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 
 const eventTypeOptions = [
   'All Types',
@@ -105,11 +11,110 @@ const eventTypeOptions = [
   'Correction',
 ]
 
+function formatEventTime(dateInput) {
+  if (!dateInput) return ''
+  const date = new Date(dateInput)
+  if (isNaN(date.getTime())) return String(dateInput)
+
+  const now = new Date()
+  const isToday = date.toDateString() === now.toDateString()
+
+  const yesterday = new Date(now)
+  yesterday.setDate(yesterday.getDate() - 1)
+  const isYesterday = date.toDateString() === yesterday.toDateString()
+
+  const timeStr = date.toLocaleTimeString('en-US', {
+    hour: 'numeric',
+    minute: '2-digit',
+    hour12: true,
+  })
+
+  if (isToday) {
+    return `Today, ${timeStr}`
+  }
+  if (isYesterday) {
+    return `Yesterday, ${timeStr}`
+  }
+  const dateStr = date.toLocaleDateString('en-US', {
+    month: 'short',
+    day: 'numeric',
+    year: date.getFullYear() !== now.getFullYear() ? 'numeric' : undefined,
+  })
+  return `${dateStr}, ${timeStr}`
+}
+
+function formatEventType(type) {
+  if (!type) return 'Other'
+  switch (String(type).toUpperCase()) {
+    case 'TOKEN_AWARD':
+      return 'Token Award'
+    case 'PARTICIPATION':
+      return 'Participation'
+    case 'ATTENDANCE':
+      return 'Attendance'
+    case 'CORRECTION':
+      return 'Correction'
+    default:
+      return type
+  }
+}
+
+function formatTokenChange(tokenChange) {
+  const num = Number(tokenChange)
+  if (isNaN(num)) return '0'
+  if (num > 0) return `+${num}`
+  return String(num)
+}
+
 export default function HistoryPage() {
+  const [events, setEvents] = useState([])
   const [selectedType, setSelectedType] = useState('All Types')
   const [selectedStudent, setSelectedStudent] = useState('All Students')
+  const [loading, setLoading] = useState(true)
+  const pollTimerRef = useRef(null)
 
-  const filteredEvents = mockEvents.filter((evt) => {
+  const fetchEvents = async () => {
+    try {
+      const data = await get(`/api/sections/${SECTION_ID}/events`)
+      if (Array.isArray(data.events)) {
+        const mapped = data.events.map((raw) => ({
+          id: raw.id,
+          time: formatEventTime(raw.createdAt),
+          studentName: raw.studentName || 'Unknown Student',
+          rollNumber: raw.rollNumber || '—',
+          type: formatEventType(raw.eventType),
+          tokenChange: formatTokenChange(raw.tokenChange),
+          description: raw.description || 'Classroom event recorded',
+          isCorrection: Boolean(raw.isCorrection || raw.eventType === 'CORRECTION' || raw.correctionOf),
+          originalAction: raw.originalAction,
+          correctionNote: raw.correctionNote,
+          createdAt: raw.createdAt,
+        }))
+        setEvents(mapped)
+      }
+    } catch (err) {
+      console.error('Failed to load events:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  useEffect(() => {
+    fetchEvents()
+    pollTimerRef.current = setInterval(fetchEvents, 2500)
+    return () => {
+      if (pollTimerRef.current) clearInterval(pollTimerRef.current)
+    }
+  }, [])
+
+  const studentOptions = [
+    'All Students',
+    ...Array.from(new Set(events.map((evt) => evt.studentName).filter(Boolean))).sort((a, b) =>
+      a.localeCompare(b)
+    ),
+  ]
+
+  const filteredEvents = events.filter((evt) => {
     const matchesType =
       selectedType === 'All Types' || evt.type === selectedType
     const matchesStudent =
@@ -178,7 +183,11 @@ export default function HistoryPage() {
 
       {/* History Events Table */}
       <div className="history-table-card card">
-        {filteredEvents.length === 0 ? (
+        {loading && events.length === 0 ? (
+          <div className="no-events">
+            <p>Loading history events...</p>
+          </div>
+        ) : filteredEvents.length === 0 ? (
           <div className="no-events">
             <p>No events found matching the selected filters.</p>
           </div>

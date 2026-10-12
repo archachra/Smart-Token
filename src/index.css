@@ -170,6 +170,41 @@ body {
   flex: 1;
 }
 
+.sidebar-nested-container {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  padding-left: 2.15rem;
+  margin-top: -0.15rem;
+  margin-bottom: 0.35rem;
+}
+
+.nested-nav-link {
+  font-size: 0.82rem;
+  padding: 0.35rem 0.65rem;
+  color: var(--text-secondary);
+  border-radius: var(--radius-sm);
+  display: flex;
+  align-items: center;
+  gap: 0.4rem;
+  text-decoration: none;
+  transition: all 0.15s ease;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.nested-nav-link:hover {
+  background-color: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.nested-nav-link.active {
+  background-color: rgba(37, 99, 235, 0.08);
+  color: var(--primary-color);
+  font-weight: 600;
+}
+
 /* Main Content Container */
 .main-content {
   flex: 1;

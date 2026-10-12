@@ -1,5 +1,8 @@
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { DEMO_STUDENT_NAMES } from '../data/demoStudents'
+import { get, post } from '../utils/api.js'
+
+const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 
 const initialStudents = [
   { id: 1, rollNumber: 'CS101-001', name: 'Arnav Chachra', seat: 'Row 1 • Seat 3', tokens: 4, initials: 'AC', color: '#2563eb', isRecent: true },
@@ -35,19 +38,79 @@ export default function QuickTokenPage() {
   const [students, setStudents] = useState(orderedStudents)
   const [searchQuery, setSearchQuery] = useState('')
 
+  useEffect(() => {
+    async function loadBackendRoster() {
+      try {
+        const data = await get(`/api/sections/${SECTION_ID}/students`)
+        if (Array.isArray(data.students)) {
+          setStudents((prev) =>
+            prev.map((student) => {
+              const matched = data.students.find(
+                (bs) =>
+                  bs.name.toLowerCase() === student.name.toLowerCase() ||
+                  bs.studentIdNumber.toLowerCase() === student.rollNumber.toLowerCase()
+              )
+              if (matched) {
+                return {
+                  ...student,
+                  backendId: matched.id,
+                  tokens: Number(matched.balance) || student.tokens,
+                }
+              }
+              return student
+            })
+          )
+        }
+      } catch (err) {
+        console.error('Failed to load roster from backend:', err)
+      }
+    }
+    loadBackendRoster()
+  }, [])
+
   // Calculate total classroom tokens dynamically
   const totalClassroomTokens = students.reduce((sum, s) => sum + s.tokens, 0)
 
-  const handleAddToken = (id) => {
+  const handleAddToken = async (id) => {
+    const target = students.find((s) => s.id === id)
     setStudents((prev) =>
       prev.map((s) => (s.id === id ? { ...s, tokens: s.tokens + 1 } : s))
     )
+    if (target?.backendId) {
+      try {
+        await post('/api/events', {
+          sectionId: SECTION_ID,
+          studentId: target.backendId,
+          tokenChange: 1,
+          eventType: 'TOKEN_AWARD',
+          description: 'Awarded token for Quick Token response in class',
+          clientEventId: crypto.randomUUID(),
+        })
+      } catch (err) {
+        console.error('Failed to persist token award event:', err)
+      }
+    }
   }
 
-  const handleSubtractToken = (id) => {
+  const handleSubtractToken = async (id) => {
+    const target = students.find((s) => s.id === id)
     setStudents((prev) =>
-      prev.map((s) => (s.id === id ? { ...s, tokens: s.tokens - 1 } : s))
+      prev.map((s) => (s.id === id ? { ...s, tokens: Math.max(0, s.tokens - 1) } : s))
     )
+    if (target?.backendId) {
+      try {
+        await post('/api/events', {
+          sectionId: SECTION_ID,
+          studentId: target.backendId,
+          tokenChange: -1,
+          eventType: 'CORRECTION',
+          description: 'Corrected accidental token award',
+          clientEventId: crypto.randomUUID(),
+        })
+      } catch (err) {
+        console.error('Failed to persist token correction event:', err)
+      }
+    }
   }
 
   // Filter students by search query

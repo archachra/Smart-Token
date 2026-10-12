@@ -1,6 +1,8 @@
 import { useEffect, useState } from 'react'
 import { ATTENDANCE_STORAGE_KEY, createDemoRoster } from '../data/demoStudents'
+import { get, patch } from '../utils/api.js'
 
+const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 const initialRoster = createDemoRoster()
 
 export default function AttendancePage() {
@@ -17,14 +19,49 @@ export default function AttendancePage() {
     localStorage.setItem(ATTENDANCE_STORAGE_KEY, JSON.stringify(students))
   }, [students])
 
-  const toggleAttendance = (id) => {
+  useEffect(() => {
+    async function syncBackendRoster() {
+      try {
+        const data = await get(`/api/sections/${SECTION_ID}/students`)
+        if (Array.isArray(data.students)) {
+          setStudents((prev) =>
+            prev.map((student) => {
+              const matched = data.students.find(
+                (bs) =>
+                  bs.name.toLowerCase() === student.name.toLowerCase() ||
+                  bs.studentIdNumber.toLowerCase() === student.rollNumber.toLowerCase()
+              )
+              return matched ? { ...student, backendId: matched.id } : student
+            })
+          )
+        }
+      } catch (err) {
+        console.error('Failed to sync roster for attendance:', err)
+      }
+    }
+    syncBackendRoster()
+  }, [])
+
+  const toggleAttendance = async (id) => {
+    const target = students.find((s) => s.id === id)
+    const nextState = !target.isPresent
     setStudents((prev) =>
       prev.map((student) =>
         student.id === id
-          ? { ...student, isPresent: !student.isPresent }
+          ? { ...student, isPresent: nextState }
           : student
       )
     )
+    if (target?.backendId) {
+      try {
+        await patch(`/api/sections/${SECTION_ID}/students/${target.backendId}/attendance`, {
+          status: nextState ? 'PRESENT' : 'ABSENT',
+          clientEventId: crypto.randomUUID(),
+        })
+      } catch (err) {
+        console.error('Failed to record attendance status change:', err)
+      }
+    }
   }
 
   const presentCount = students.filter((s) => s.isPresent).length

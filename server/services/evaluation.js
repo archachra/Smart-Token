@@ -26,31 +26,29 @@ export function validateEvaluation(value) {
   }
 }
 
-const EVALUATION_SYSTEM_PROMPT = `You are an expert Computer Science university evaluator assessing a student spoken classroom participation response.
+const EVALUATION_SYSTEM_PROMPT = `You are a classroom evaluator assessing student spoken participation.
 
 Inputs:
-- Topic: The Computer Science domain (e.g. "Computer Networks", "Operating Systems", "Data Structures").
-- Extra Info: Specific question or targeted context given by faculty, if present. When present, Extra Info is the PRIMARY reference for correctness and relevance.
-- Student Transcript: Spoken response transcribed via Speech-to-Text (ASR).
+- Topic: Discussion topic or subject.
+- Extra Info: Specific question or context from the teacher, if present.
+- Student Transcript: Student's spoken response from speech-to-text.
 
-Evaluation Policy:
-1. Speech-to-Text Tolerance: Tolerate minor ASR transcription artifacts, phonetic misspellings, and conversational speech fillers (e.g., "um", "uh", "like", "you know", "basically"). Judge the intended meaning and conceptual understanding, NOT exact wording, rigid syntax, or buzzwords.
-2. Relevance: Determine if the student's answer genuinely addresses the Topic and Extra Info context.
-3. Correctness: Determine if the core Computer Science concepts in the student's response are accurate.
-4. Suggested Token Change rules:
-   * +3: ONLY for an exceptionally strong, detailed, and insightful answer to a specific and sufficiently complex question demonstrating deep insight.
-   * +2: Strong, detailed answer with clear explanation or multiple correct points demonstrating solid understanding.
-   * +1: Good, accurate short answer or core insight.
-   * 0: Ambiguous, vague, or insufficient answer, completely incorrect statement, or no meaningful contribution. (Prefer 0 when ambiguous or insufficient).
-   * -1: ONLY for a clearly irrelevant answer, deliberate off-topic deflection, or justified deduction.
-   * DO NOT determine token change from answer length alone. A concise, precise answer can earn +1 or +2, while long, rambling, hollow answers should receive 0.
+Rules:
+1. Evaluate against the provided Topic and Extra Info. Topic determines the relevant academic domain.
+2. Speech Tolerance: Tolerate speech-to-text quirks, accents, repetitions, and filler words ("um", "uh", "like"). Judge intended meaning rather than rigid phrasing. If wording appears absurd because of a likely speech-to-text error, use the surrounding context to infer the likely intended meaning, but never invent missing content.
+3. Token Guide:
+   - +1: Good, accurate, or relevant answer, including concise answers such as correctly naming an item.
+   - +2: Strong, detailed answer with explanation or multiple correct points.
+   - +3: Exceptional, deep, or unusually insightful response, usually to a specific and sufficiently complex question.
+   - 0: Blank, off-topic, incorrect, ambiguous, or no meaningful contribution.
+   - -1: Clearly disruptive, deliberately irrelevant, or inappropriate response. Do not deduct merely because of possible speech-to-text errors.
 
-Return ONLY a JSON object matching this schema:
+Return ONLY a JSON object:
 {
   "relevant": boolean,
   "correct": boolean,
-  "reason": string (concise explanation of relevance, correctness, and token justification),
-  "suggested_token_change": integer (-1, 0, 1, 2, or 3)
+  "reason": "concise explanation",
+  "suggested_token_change": integer
 }`
 
 export async function evaluateWithGroq({ topic, extraInfo, transcript }, fetchImpl = fetch) {
@@ -214,7 +212,8 @@ export async function finalizeRecordingEvaluation({ recordingId, sectionId, facu
     const check = await client.query(
       `SELECT re.id, re.status, re.suggested_token_change AS "suggestedTokenChange",
               re.final_token_change AS "finalTokenChange", re.finalized_event_id AS "finalizedEventId",
-              rs.student_id AS "studentId"
+              re.reason,
+              rs.student_id AS "studentId", rs.topic, rs.extra_info AS "extraInfo"
        FROM recording_evaluations re
        JOIN recording_sessions rs ON rs.id = re.recording_session_id
        WHERE re.recording_session_id = $1 AND rs.section_id = $2
@@ -238,11 +237,22 @@ export async function finalizeRecordingEvaluation({ recordingId, sectionId, facu
       throw Object.assign(new Error('Only completed evaluations can be finalized'), { statusCode: 400 })
     }
     const clientEventId = randomUUID()
+    let eventDescription = 'Classroom speech participation'
+    if (evaluation.topic && evaluation.extraInfo) {
+      eventDescription = `Speech participation: "${evaluation.topic}" — ${evaluation.extraInfo}`
+    } else if (evaluation.topic) {
+      eventDescription = `Speech participation on "${evaluation.topic}"`
+    } else if (evaluation.extraInfo) {
+      eventDescription = `Speech participation: ${evaluation.extraInfo}`
+    } else if (evaluation.reason) {
+      eventDescription = `Speech participation: ${evaluation.reason}`
+    }
+
     const event = await client.query(
       `INSERT INTO events (client_event_id, section_id, student_id, created_by, event_type, token_change, description)
        VALUES ($1, $2, $3, $4, 'PARTICIPATION', $5, $6)
        RETURNING id, token_change AS "tokenChange", created_at AS "createdAt"`,
-      [clientEventId, sectionId, evaluation.studentId, facultyUserId, finalTokenChange, 'Faculty finalized participation evaluation after reviewing AI suggestion']
+      [clientEventId, sectionId, evaluation.studentId, facultyUserId, finalTokenChange, eventDescription]
     )
     const balance = await client.query(
       `INSERT INTO student_balances (student_id, section_id, balance)

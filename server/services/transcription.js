@@ -14,6 +14,8 @@ export async function transcribeAudioFile(filePath, fetchImpl = fetch) {
   const form = new FormData()
   form.append('file', new Blob([audioBuffer], { type: 'audio/webm' }), 'recording.webm')
   form.append('model', process.env.GROQ_TRANSCRIPTION_MODEL || 'whisper-large-v3-turbo')
+  form.append('language', process.env.GROQ_TRANSCRIPTION_LANGUAGE || 'en')
+  form.append('prompt', process.env.GROQ_TRANSCRIPTION_PROMPT || 'Classroom discussion in English and Hinglish.')
   form.append('response_format', 'json')
 
   const response = await fetchImpl(GROQ_TRANSCRIPTION_URL, {
