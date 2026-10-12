@@ -91,7 +91,9 @@ async function runApiTests() {
   }
 }
 
-runApiTests().catch((err) => {
+runApiTests().then(() => {
+  process.exit(0)
+}).catch((err) => {
   console.error('❌ API Test Failed:', err)
   process.exit(1)
 })

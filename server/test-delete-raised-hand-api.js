@@ -13,6 +13,7 @@ async function runDeleteRaisedHandApiTests() {
 
   let server
   const PORT = 3094
+  let sectionId, studentId
 
   try {
     await new Promise((resolve) => {
@@ -23,15 +24,19 @@ async function runDeleteRaisedHandApiTests() {
 
     // Fetch valid sectionId and studentId from DB
     const sectionRes = await pool.query(`SELECT id FROM sections LIMIT 1`)
-    const studentRes = await pool.query(`SELECT id FROM students LIMIT 1`)
-
-    if (sectionRes.rowCount === 0 || studentRes.rowCount === 0) {
+    if (sectionRes.rowCount === 0) {
       throw new Error('Seed data missing. Run db/verify.js first!')
     }
 
-    // Fetch valid IDs
-    const sectionId = sectionRes.rows[0].id;
-    const studentId = studentRes.rows[0].id;
+    sectionId = sectionRes.rows[0].id;
+    const studentRes = await pool.query(
+      `SELECT s.id FROM students s JOIN enrollments e ON e.student_id = s.id WHERE e.section_id = $1 LIMIT 1`,
+      [sectionId]
+    )
+    if (studentRes.rowCount === 0) {
+      throw new Error('No enrolled student found in section!')
+    }
+    studentId = studentRes.rows[0].id;
     // Unauthenticated request (should be 401)
     const unauthRes = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised/${generateUuid()}`, {
       method: 'DELETE'
@@ -100,7 +105,8 @@ async function runDeleteRaisedHandApiTests() {
       `SELECT COALESCE(balance, 0) AS balance FROM student_balances WHERE student_id = $1 AND section_id = $2`,
       [studentId, sectionId]
     )
-    if (postBalRes.rows[0].balance !== initialBalance) {
+    const postBalance = postBalRes.rowCount > 0 ? postBalRes.rows[0].balance : 0
+    if (postBalance !== initialBalance) {
       throw new Error('FAIL: student_balances balance was modified! Deleting raised hands must not alter balances.')
     }
 
@@ -165,6 +171,13 @@ async function runDeleteRaisedHandApiTests() {
     if (res4.status !== 400) throw new Error(`Expected 400 Bad Request, got ${res4.status}`)
     console.log('✅ Test 4 PASSED: Invalid UUID format correctly rejected.\n')
   } finally {
+    try {
+      if (studentId && sectionId) {
+        await pool.query(`DELETE FROM raised_hands WHERE student_id = $1 AND section_id = $2`, [studentId, sectionId])
+      }
+    } catch (cleanErr) {
+      console.error('Error during cleanup in test-delete-raised-hand-api:', cleanErr)
+    }
     if (server) {
       server.close()
     }
@@ -172,7 +185,9 @@ async function runDeleteRaisedHandApiTests() {
   }
 }
 
-runDeleteRaisedHandApiTests().catch((err) => {
+runDeleteRaisedHandApiTests().then(() => {
+  process.exit(0)
+}).catch((err) => {
   console.error('❌ Delete Raised Hand API Test Failed:', err)
   process.exit(1)
 })

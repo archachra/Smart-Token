@@ -14,6 +14,7 @@ async function runRaisedHandApiTests() {
 
   let server
   const PORT = 3096
+  let sectionId, studentId
 
   try {
     await new Promise((resolve) => {
@@ -33,8 +34,8 @@ async function runRaisedHandApiTests() {
       throw new Error('Seed data missing. Run db/verify.js first!')
     }
 
-    const sectionId = sectionRes.rows[0].id
-    const studentId = studentRes.rows[0].id;
+    sectionId = sectionRes.rows[0].id
+    studentId = studentRes.rows[0].id;
   // Unauthenticated request (should be 401)
   const unauthRes = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raise`, {
     method: 'POST',
@@ -182,6 +183,16 @@ async function runRaisedHandApiTests() {
 
     console.log('🎉 ALL RAISED-HAND API TESTS PASSED SUCCESSFULLY!')
   } finally {
+    try {
+      if (studentId && sectionId) {
+        await pool.query(
+          `DELETE FROM raised_hands WHERE student_id = $1 AND section_id = $2`,
+          [studentId, sectionId]
+        )
+      }
+    } catch (cleanErr) {
+      console.error('Error during test cleanup:', cleanErr)
+    }
     if (server) {
       server.close()
     }
@@ -189,7 +200,9 @@ async function runRaisedHandApiTests() {
   }
 }
 
-runRaisedHandApiTests().catch((err) => {
+runRaisedHandApiTests().then(() => {
+  process.exit(0)
+}).catch((err) => {
   console.error('❌ Raised Hand API Test Failed:', err)
   process.exit(1)
 })

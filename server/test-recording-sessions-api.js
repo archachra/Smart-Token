@@ -13,6 +13,7 @@ async function runRecordingSessionsApiTests() {
 
   let server
   const PORT = 3093
+  let sectionId, studentId, requestId
 
   try {
     await new Promise((resolve) => {
@@ -32,8 +33,8 @@ async function runRecordingSessionsApiTests() {
       throw new Error('Seed data missing. Run db/verify.js first!')
     }
 
-    const sectionId = sectionRes.rows[0].id
-    const studentId = studentRes.rows[0].id
+    sectionId = sectionRes.rows[0].id
+    studentId = studentRes.rows[0].id
 
     // Ensure clean state: create a fresh raised_hand request
     await pool.query(`DELETE FROM raised_hands WHERE student_id = $1 AND section_id = $2`, [studentId, sectionId])
@@ -41,7 +42,7 @@ async function runRecordingSessionsApiTests() {
       `INSERT INTO raised_hands (section_id, student_id) VALUES ($1, $2) RETURNING id`,
       [sectionId, studentId]
     )
-    const requestId = raisedRes.rows[0].id
+    requestId = raisedRes.rows[0].id
 
     // Record initial event count & initial balance
     const initEventCountRes = await pool.query(`SELECT COUNT(*)::int AS count FROM events`)
@@ -252,6 +253,18 @@ async function runRecordingSessionsApiTests() {
 
     console.log('🎉 ALL RECORDING SESSION API TESTS PASSED SUCCESSFULLY!')
   } finally {
+    try {
+      if (requestId) {
+        await pool.query(`DELETE FROM recording_evaluations WHERE recording_session_id IN (SELECT id FROM recording_sessions WHERE raised_hand_id = $1)`, [requestId])
+        await pool.query(`DELETE FROM recording_sessions WHERE raised_hand_id = $1`, [requestId])
+        await pool.query(`DELETE FROM raised_hands WHERE id = $1`, [requestId])
+      }
+      if (studentId && sectionId) {
+        await pool.query(`DELETE FROM raised_hands WHERE student_id = $1 AND section_id = $2`, [studentId, sectionId])
+      }
+    } catch (cleanErr) {
+      console.error('Error during cleanup in test-recording-sessions-api:', cleanErr)
+    }
     if (server) {
       server.close()
     }
@@ -259,7 +272,9 @@ async function runRecordingSessionsApiTests() {
   }
 }
 
-runRecordingSessionsApiTests().catch((err) => {
+runRecordingSessionsApiTests().then(() => {
+  process.exit(0)
+}).catch((err) => {
   console.error('❌ Recording Sessions API Test Failed:', err)
   process.exit(1)
 })

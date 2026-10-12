@@ -8,6 +8,7 @@ async function runGetRaisedHandsApiTests() {
 
   let server
   const PORT = 3095
+  let sectionId, s1Id, s2Id, user1, user2
 
   try {
     await new Promise((resolve) => {
@@ -21,7 +22,7 @@ async function runGetRaisedHandsApiTests() {
     if (sectionRes.rowCount === 0) {
       throw new Error('Seed data missing. Run db/verify.js first!')
     }
-    const sectionId = sectionRes.rows[0].id
+    sectionId = sectionRes.rows[0].id
 
     // Unauthenticated request (should be 401)
     const unauthRes = await fetch(`${baseUrl}/api/sections/${sectionId}/participation/raised`)
@@ -56,14 +57,14 @@ async function runGetRaisedHandsApiTests() {
 
     // Test Case 2: Successful Retrieval & Chronological Ordering
     // Create 2 students enrolled in section
-    const user1 = await pool.query(`INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING id`, [`st1_${Date.now()}@test.edu`, 'First Student', 'STUDENT'])
-    const user2 = await pool.query(`INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING id`, [`st2_${Date.now()}@test.edu`, 'Second Student', 'STUDENT'])
+    user1 = await pool.query(`INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING id`, [`st1_${Date.now()}@test.edu`, 'First Student', 'STUDENT'])
+    user2 = await pool.query(`INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING id`, [`st2_${Date.now()}@test.edu`, 'Second Student', 'STUDENT'])
 
     const stud1 = await pool.query(`INSERT INTO students (user_id, student_id_number, name, email) VALUES ($1, $2, $3, $4) RETURNING id`, [user1.rows[0].id, `ST1-${Date.now()}`, 'First Student', `st1_${Date.now()}@test.edu`])
     const stud2 = await pool.query(`INSERT INTO students (user_id, student_id_number, name, email) VALUES ($1, $2, $3, $4) RETURNING id`, [user2.rows[0].id, `ST2-${Date.now()}`, 'Second Student', `st2_${Date.now()}@test.edu`])
 
-    const s1Id = stud1.rows[0].id
-    const s2Id = stud2.rows[0].id
+    s1Id = stud1.rows[0].id
+    s2Id = stud2.rows[0].id
 
     await pool.query(`INSERT INTO enrollments (student_id, section_id) VALUES ($1, $2), ($3, $4)`, [s1Id, sectionId, s2Id, sectionId])
 
@@ -137,17 +138,30 @@ async function runGetRaisedHandsApiTests() {
 
     console.log('🎉 ALL GET RAISED-HAND API TESTS PASSED SUCCESSFULLY!')
   } finally {
+    try {
+      if (sectionId) {
+        await pool.query('DELETE FROM raised_hands WHERE section_id = $1', [sectionId])
+      }
+      if (s1Id && s2Id) {
+        await pool.query('DELETE FROM enrollments WHERE student_id IN ($1, $2)', [s1Id, s2Id])
+        await pool.query('DELETE FROM students WHERE id IN ($1, $2)', [s1Id, s2Id])
+      }
+      if (user1?.rows?.[0]?.id && user2?.rows?.[0]?.id) {
+        await pool.query('DELETE FROM users WHERE id IN ($1, $2)', [user1.rows[0].id, user2.rows[0].id])
+      }
+    } catch (cleanErr) {
+      console.error('Error during cleanup in test-get-raised-hands-api:', cleanErr)
+    }
     if (server) {
       server.close()
     }
-    try {
-      await pool.query('DELETE FROM raised_hands WHERE section_id = $1', [sectionId])
-    } catch {}
     await pool.end()
   }
 }
 
-runGetRaisedHandsApiTests().catch((err) => {
+runGetRaisedHandsApiTests().then(() => {
+  process.exit(0)
+}).catch((err) => {
   console.error('❌ Get Raised Hands API Test Failed:', err)
   process.exit(1)
 })

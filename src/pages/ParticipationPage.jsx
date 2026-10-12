@@ -43,13 +43,35 @@ const rosterStudents = [
 const allStudents = DEMO_STUDENT_NAMES.map((name) => rosterStudents.find((student) => student.name === name)).filter(Boolean)
 
 export default function ParticipationPage() {
-  // raisedHands now comes from the backend API
+  const [students, setStudents] = useState(allStudents)
+  // raisedHands comes dynamically from the backend API
   const [raisedHands, setRaisedHands] = useState([])
-  const [recordings, setRecordings] = useState([])
-  const [finalChanges, setFinalChanges] = useState({})
-  const [finalizeErrors, setFinalizeErrors] = useState({})
   const [recordingStudentId, setRecordingStudentId] = useState(null)
   const pollTimer = useRef(null)
+
+  // Sync roster with backend so real student UUIDs match raised hand items
+  useEffect(() => {
+    async function syncBackendRoster() {
+      try {
+        const data = await get(`/api/sections/${SECTION_ID}/students`)
+        if (Array.isArray(data.students)) {
+          setStudents((prev) =>
+            prev.map((student) => {
+              const matched = data.students.find(
+                (bs) =>
+                  bs.name.toLowerCase() === student.name.toLowerCase() ||
+                  bs.studentIdNumber.toLowerCase() === student.rollNumber.toLowerCase()
+              )
+              return matched ? { ...student, backendId: matched.id } : student
+            })
+          )
+        }
+      } catch (err) {
+        console.error('Failed to sync roster for participation:', err)
+      }
+    }
+    syncBackendRoster()
+  }, [])
 
   // Load raised‑hand queue on mount and start polling
   useEffect(() => {
@@ -61,12 +83,9 @@ export default function ParticipationPage() {
           id: req.id,
           studentId: req.studentId,
           studentName: req.studentName,
-          // Display human‑readable time offset – for simplicity show ISO string
           time: new Date(req.raisedAt).toLocaleTimeString(),
         }))
         setRaisedHands(mapped)
-        const recordingData = await get(`/api/sections/${SECTION_ID}/participation/recordings`)
-        setRecordings(recordingData.recordings || [])
       } catch (e) {
         console.error('Failed to load raised‑hand queue', e)
       }
@@ -121,16 +140,6 @@ export default function ParticipationPage() {
     }
   }
 
-  const finalizeEvaluation = async (recording, change) => {
-    try {
-      await post(`/api/sections/${SECTION_ID}/participation/recordings/${recording.id}/evaluation/decision`, { finalTokenChange: change })
-      const refreshed = await get(`/api/sections/${SECTION_ID}/participation/recordings`)
-      setRecordings(refreshed.recordings || [])
-    } catch (e) {
-      setFinalizeErrors((prev) => ({ ...prev, [recording.id]: e.message || 'Finalization failed' }))
-    }
-  }
-
   return (
     <div className="participation-container">
       {/* Two Column Layout Grid */}
@@ -145,13 +154,14 @@ export default function ParticipationPage() {
           <div className="student-boxes-section">
             <div className="section-subheader">
               <h3>Classroom Roster</h3>
-              <span className="roster-count">{allStudents.length} Students</span>
+              <span className="roster-count">{students.length} Students</span>
             </div>
 
             <div className="alphabetical-student-grid">
-              {allStudents.map((student) => {
-                const isRecording = recordingStudentId === student.id
-                const isHandRaised = raisedHands.some((item) => item.studentId === student.id)
+              {students.map((student) => {
+                const sId = student.backendId || student.id
+                const isRecording = recordingStudentId === sId
+                const isHandRaised = raisedHands.some((item) => item.studentId === student.backendId || item.studentId === student.id)
 
                 return (
                   <div
@@ -159,7 +169,7 @@ export default function ParticipationPage() {
                     className={`student-box ${isRecording ? 'recording' : ''} ${
                       isHandRaised ? 'hand-raised' : ''
                     }`}
-                    onClick={() => handleToggleRecording(student.id)}
+                    onClick={() => handleToggleRecording(sId)}
                   >
                     <div className="box-top">
                       <div
@@ -189,7 +199,7 @@ export default function ParticipationPage() {
                       }`}
                       onClick={(e) => {
                         e.stopPropagation()
-                        handleToggleRecording(student.id)
+                        handleToggleRecording(sId)
                       }}
                     >
                       {isRecording ? 'Stop Recording' : 'Record from Here'}
@@ -284,49 +294,6 @@ export default function ParticipationPage() {
               })}
             </div>
           )}
-
-          <div style={{ marginTop: '1.5rem' }}>
-            <div className="panel-header"><h3>Completed Responses</h3></div>
-            {recordings.length === 0 ? <p>No recordings yet</p> : recordings.map((recording) => (
-              <div key={recording.id} style={{ padding: '0.7rem 0', borderBottom: '1px solid #e2e8f0' }}>
-                <strong>{recording.studentName}</strong>
-                <div style={{ fontSize: '0.8rem', color: '#64748b' }}>{recording.topic}</div>
-                {recording.transcriptionStatus === 'COMPLETED' ? (
-                  <p style={{ margin: '0.35rem 0 0' }}>{recording.transcript || '(Empty transcript)'}</p>
-                ) : recording.transcriptionStatus === 'FAILED' ? (
-                  <p style={{ margin: '0.35rem 0 0', color: '#dc2626' }}>Transcription failed</p>
-                ) : (
-                  <p style={{ margin: '0.35rem 0 0', color: '#64748b' }}>Transcription processing…</p>
-                )}
-                {(!recording.evaluationStatus || recording.evaluationStatus === 'PENDING' || recording.evaluationStatus === 'PROCESSING') && (
-                  <p style={{ margin: '0.35rem 0 0', color: '#64748b', fontSize: '0.85rem' }}>
-                    {recording.transcriptionStatus === 'COMPLETED' ? 'Evaluation processing…' : 'Waiting for transcript to evaluate…'}
-                  </p>
-                )}
-                {(recording.evaluationStatus === 'COMPLETED' || recording.evaluationStatus === 'FINALIZED') && (
-                  <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: '#f8fafc' }}>
-                    <strong>AI suggestion (faculty review required)</strong>
-                    <div>{recording.evaluationRelevant ? 'Relevant' : 'Not relevant'} · {recording.evaluationCorrect ? 'Correct' : 'Needs improvement'}</div>
-                    <div>{recording.evaluationReason}</div>
-                    <div>Suggested token change: {recording.suggestedTokenChange > 0 ? '+' : ''}{recording.suggestedTokenChange}</div>
-                    {recording.evaluationStatus === 'FINALIZED' ? (
-                      <div style={{ color: '#166534', fontWeight: 600 }}>Finalized: {recording.finalTokenChange > 0 ? '+' : ''}{recording.finalTokenChange} token(s)</div>
-                    ) : (
-                      <div style={{ marginTop: '0.5rem' }}>
-                        <button className="recording-action-btn start" onClick={() => finalizeEvaluation(recording, recording.suggestedTokenChange)}>Approve Suggestion</button>
-                        <select value={finalChanges[recording.id] ?? recording.suggestedTokenChange} onChange={(e) => setFinalChanges((prev) => ({ ...prev, [recording.id]: Number(e.target.value) }))} style={{ marginLeft: '0.5rem' }}>
-                          <option value="-1">-1</option><option value="0">0</option><option value="1">+1</option><option value="2">+2</option><option value="3">+3</option>
-                        </select>
-                        <button className="recording-action-btn start" onClick={() => finalizeEvaluation(recording, finalChanges[recording.id] ?? recording.suggestedTokenChange)} style={{ marginLeft: '0.5rem' }}>Finalize Edited</button>
-                        {finalizeErrors[recording.id] && <div style={{ color: '#dc2626' }}>{finalizeErrors[recording.id]}</div>}
-                      </div>
-                    )}
-                  </div>
-                )}
-                {recording.evaluationStatus === 'FAILED' && <p style={{ color: '#dc2626', fontSize: '0.85rem', margin: '0.35rem 0 0' }}>AI evaluation failed; no token change was made.</p>}
-              </div>
-            ))}
-          </div>
         </aside>
       </div>
     </div>

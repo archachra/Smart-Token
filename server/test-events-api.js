@@ -14,6 +14,8 @@ async function runEventsApiTests() {
 
   let server
   const PORT = 3098
+  let sectionId, studentId, createdBy, initialBalance
+  let clientEventId1, clientEventId2, unenrolledStudentId, dummyUserRes
 
   try {
     await new Promise((resolve) => {
@@ -22,25 +24,30 @@ async function runEventsApiTests() {
 
     const baseUrl = `http://localhost:${PORT}`
 
-    // Fetch valid seed IDs from DB
     const sectionRes = await pool.query(`SELECT id FROM sections LIMIT 1`)
-    const studentRes = await pool.query(`SELECT id FROM students LIMIT 1`)
     const facultyRes = await pool.query(`SELECT id FROM users WHERE role = 'FACULTY' LIMIT 1`)
 
-    if (sectionRes.rowCount === 0 || studentRes.rowCount === 0 || facultyRes.rowCount === 0) {
+    if (sectionRes.rowCount === 0 || facultyRes.rowCount === 0) {
       throw new Error('Seed data missing. Run db/verify.js first!')
     }
 
-    const sectionId = sectionRes.rows[0].id
-    const studentId = studentRes.rows[0].id
-    const createdBy = facultyRes.rows[0].id
+    sectionId = sectionRes.rows[0].id
+    const studentRes = await pool.query(
+      `SELECT s.id FROM students s JOIN enrollments e ON e.student_id = s.id WHERE e.section_id = $1 LIMIT 1`,
+      [sectionId]
+    )
+    if (studentRes.rowCount === 0) {
+      throw new Error('No enrolled student found in section!')
+    }
+    studentId = studentRes.rows[0].id
+    createdBy = facultyRes.rows[0].id
 
     // Fetch initial balance
     const initBalRes = await pool.query(
       `SELECT COALESCE(balance, 0) as balance FROM student_balances WHERE student_id = $1 AND section_id = $2`,
       [studentId, sectionId]
     )
-    const initialBalance = initBalRes.rowCount > 0 ? initBalRes.rows[0].balance : 0
+    initialBalance = initBalRes.rowCount > 0 ? initBalRes.rows[0].balance : 0
 
     // Unauthenticated request (should be 401)
     const unauthRes = await fetch(`${baseUrl}/api/events`, {
@@ -61,7 +68,7 @@ async function runEventsApiTests() {
     const authHeaders = { 'Content-Type': 'application/json', Authorization: `Bearer ${token}` };
 
     // Test 1: Successful Token Award (+2)
-    const clientEventId1 = generateUuid()
+    clientEventId1 = generateUuid()
     console.log(`Test 1: POST /api/events - Successful Token Award (+2)`)
     const res1 = await fetch(`${baseUrl}/api/events`, {
       method: 'POST',
@@ -91,7 +98,7 @@ async function runEventsApiTests() {
     console.log('✅ Test 1 PASSED: Token award succeeded and balance updated.\n')
 
     // Test 2: Negative Token Adjustment (-1)
-    const clientEventId2 = generateUuid()
+    clientEventId2 = generateUuid()
     console.log(`Test 2: POST /api/events - Negative Token Adjustment (-1)`)
     const res2 = await fetch(`${baseUrl}/api/events`, {
       method: 'POST',
@@ -145,7 +152,7 @@ async function runEventsApiTests() {
 
     // Test 4: Invalid Student/Section Relationship (Unenrolled student)
     // Create un-enrolled student for test
-    const dummyUserRes = await pool.query(
+    dummyUserRes = await pool.query(
       `INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING id`,
       [`unenrolled_${Date.now()}@smarttoken.edu`, 'Unenrolled Student', 'STUDENT']
     )
@@ -153,7 +160,7 @@ async function runEventsApiTests() {
       `INSERT INTO students (user_id, student_id_number, name, email) VALUES ($1, $2, $3, $4) RETURNING id`,
       [dummyUserRes.rows[0].id, `UNENROLLED-${Date.now()}`, 'Unenrolled Student', `unenrolled_${Date.now()}@smarttoken.edu`]
     )
-    const unenrolledStudentId = dummyStudentRes.rows[0].id
+    unenrolledStudentId = dummyStudentRes.rows[0].id
 
     console.log(`Test 4: POST /api/events - Invalid Student/Section Relationship`)
     const res4 = await fetch(`${baseUrl}/api/events`, {
@@ -217,6 +224,28 @@ async function runEventsApiTests() {
 
     console.log('🎉 ALL TOKEN ADJUSTMENT API TESTS PASSED SUCCESSFULLY!')
   } finally {
+    try {
+      if (typeof clientEventId1 !== 'undefined' || typeof clientEventId2 !== 'undefined') {
+        await pool.query(
+          `DELETE FROM events WHERE client_event_id IN ($1, $2)`,
+          [clientEventId1 || generateUuid(), clientEventId2 || generateUuid()]
+        )
+      }
+      if (typeof initialBalance !== 'undefined' && typeof studentId !== 'undefined' && typeof sectionId !== 'undefined') {
+        await pool.query(
+          `UPDATE student_balances SET balance = $1 WHERE student_id = $2 AND section_id = $3`,
+          [initialBalance, studentId, sectionId]
+        )
+      }
+      if (typeof unenrolledStudentId !== 'undefined') {
+        await pool.query(`DELETE FROM students WHERE id = $1`, [unenrolledStudentId])
+      }
+      if (typeof dummyUserRes !== 'undefined' && dummyUserRes?.rows?.[0]?.id) {
+        await pool.query(`DELETE FROM users WHERE id = $1`, [dummyUserRes.rows[0].id])
+      }
+    } catch (cleanErr) {
+      console.error('Error during test cleanup:', cleanErr)
+    }
     if (server) {
       server.close()
     }
@@ -224,7 +253,9 @@ async function runEventsApiTests() {
   }
 }
 
-runEventsApiTests().catch((err) => {
+runEventsApiTests().then(() => {
+  process.exit(0)
+}).catch((err) => {
   console.error('❌ Events API Test Failed:', err)
   process.exit(1)
 })
