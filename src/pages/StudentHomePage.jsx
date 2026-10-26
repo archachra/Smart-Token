@@ -23,6 +23,8 @@ export default function StudentHomePage() {
   const [recordingId, setRecordingId] = useState(null);
   const [topic, setTopic] = useState('');
   const [extraInfo, setExtraInfo] = useState('');
+  const [discussionTopic, setDiscussionTopic] = useState('');
+  const [discussionExtraInfo, setDiscussionExtraInfo] = useState('');
   const [audioUrl, setAudioUrl] = useState(null);
   const [recordedDuration, setRecordedDuration] = useState(0);
   const [micError, setMicError] = useState(null);
@@ -146,6 +148,24 @@ export default function StudentHomePage() {
     loadRoster();
   }, [loadRoster]);
 
+  const loadDiscussionTopic = useCallback(async () => {
+    try {
+      const data = await get(`/api/sections/${SECTION_ID}/participation/topic`);
+      if (data) {
+        setDiscussionTopic(data.topic || '');
+        setDiscussionExtraInfo(data.extraInfo || '');
+      }
+    } catch (e) {
+      // Non-blocking topic poll error
+    }
+  }, []);
+
+  useEffect(() => {
+    loadDiscussionTopic();
+    const interval = setInterval(loadDiscussionTopic, 3000);
+    return () => clearInterval(interval);
+  }, [loadDiscussionTopic]);
+
   const loadStudentAssignments = async () => {
     try {
       setLoadingAssignments(true);
@@ -227,7 +247,12 @@ export default function StudentHomePage() {
     };
   }, []);
 
-  // Poll for faculty approval tied strictly to targetRaisedHandId (Requirement B & E)
+  /* =========================================================================
+   * LEGACY RAISED-HAND CODE (Commented out per user request)
+   * The teacher requested removing the raise hand requirement so students can
+   * record audio and speak at any time without waiting for manual hand-raise approval.
+   * Kept here for easy re-enablement if needed in the future.
+   *
   const pollForApproval = (targetRaisedHandId, targetStudentId) => {
     activePollSessionRef.current = { pollType: 'APPROVAL', targetId: targetRaisedHandId };
 
@@ -252,7 +277,6 @@ export default function StudentHomePage() {
         }
 
         if (resp.session && resp.session.status === 'APPROVED') {
-          // Requirement C: Approval arrived - clear stale recording state, show recording action only
           stopPolling();
           setRecordingId(resp.session.id);
           setTopic(resp.session.topic || '');
@@ -281,6 +305,49 @@ export default function StudentHomePage() {
 
     pollTimerRef.current = setTimeout(tick, 1500);
   };
+
+  const handleRaiseHand = async () => {
+    if (!studentId) return;
+    try {
+      resetSessionState();
+      setMicError(null);
+      setUiState(UI_STATES.WAITING);
+
+      let newRaisedHandId;
+      try {
+        const resp = await post(`/api/sections/${SECTION_ID}/participation/raise`, { studentId });
+        newRaisedHandId = resp.request.id;
+      } catch (err) {
+        const queueResp = await get(`/api/sections/${SECTION_ID}/participation/raised`);
+        const existing = (queueResp.requests || []).find((r) => r.studentId === studentId);
+        if (existing) {
+          newRaisedHandId = existing.id;
+        } else {
+          throw err;
+        }
+      }
+
+      setRaisedHandId(newRaisedHandId);
+      pollForApproval(newRaisedHandId, studentId);
+    } catch (e) {
+      console.error('Raise hand failed:', e);
+      setUiState(UI_STATES.IDLE);
+      setMicError('Failed to raise hand. Please try again.');
+    }
+  };
+
+  const handleCancel = async () => {
+    stopPolling();
+    if (raisedHandId) {
+      try {
+        await del(`/api/sections/${SECTION_ID}/participation/raised/${raisedHandId}`);
+      } catch (e) {
+        console.error('Cancel failed', e);
+      }
+    }
+    resetSessionState();
+  };
+  ========================================================================= */
 
   // Poll for transcription & evaluation tied strictly to targetRecordingId (Requirement D & E)
   const pollForTranscription = (targetRecordingId) => {
@@ -363,58 +430,34 @@ export default function StudentHomePage() {
     pollTimerRef.current = setTimeout(tick, 1000);
   };
 
-  // Requirement B: When student clicks Raise Hand, immediately clear/hide current recording UI
-  const handleRaiseHand = async () => {
-    if (!studentId) return;
-    try {
-      resetSessionState();
-      setMicError(null);
-      setUiState(UI_STATES.WAITING);
-
-      let newRaisedHandId;
-      try {
-        const resp = await post(`/api/sections/${SECTION_ID}/participation/raise`, { studentId });
-        newRaisedHandId = resp.request.id;
-      } catch (err) {
-        const queueResp = await get(`/api/sections/${SECTION_ID}/participation/raised`);
-        const existing = (queueResp.requests || []).find((r) => r.studentId === studentId);
-        if (existing) {
-          newRaisedHandId = existing.id;
-        } else {
-          throw err;
-        }
-      }
-
-      setRaisedHandId(newRaisedHandId);
-      pollForApproval(newRaisedHandId, studentId);
-    } catch (e) {
-      console.error('Raise hand failed:', e);
-      setUiState(UI_STATES.IDLE);
-      setMicError('Failed to raise hand. Please try again.');
-    }
-  };
-
-  const handleCancel = async () => {
-    stopPolling();
-    if (raisedHandId) {
-      try {
-        await del(`/api/sections/${SECTION_ID}/participation/raised/${raisedHandId}`);
-      } catch (e) {
-        console.error('Cancel failed', e);
-      }
-    }
-    resetSessionState();
-  };
-
-  // Requirement C: Start recording
+  // Direct Recording Start: Seamless participation allowing students to record anytime
   const handleStartRecording = async () => {
-    if (!recordingId) return;
     setMicError(null);
 
     try {
+      // 1. Request microphone access first
       const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
       mediaStreamRef.current = stream;
 
+      // 2. Create direct recording session on backend
+      const resp = await post(`/api/sections/${SECTION_ID}/participation/recordings`, {});
+      const session = resp.session;
+      if (!session || !session.id) {
+        throw new Error('Failed to create participation recording session.');
+      }
+
+      setRecordingId(session.id);
+      setTopic(session.topic || discussionTopic || '');
+      setExtraInfo(session.extraInfo || discussionExtraInfo || '');
+      revokeAudioUrl();
+      setAudioUrl(null);
+      setRecordedDuration(0);
+      setTranscript(null);
+      setTranscriptionStatus(null);
+      setTranscriptionError(null);
+      setEvaluation(null);
+
+      // 3. Initialize MediaRecorder
       const mediaRecorder = new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
@@ -427,12 +470,16 @@ export default function StudentHomePage() {
 
       mediaRecorder.start(100);
       recordStartTimeRef.current = Date.now();
-
-      await patch(`/api/sections/${SECTION_ID}/participation/recordings/${recordingId}/start`);
       setUiState(UI_STATES.RECORDING);
     } catch (err) {
-      console.error('Microphone permission or start error:', err);
-      setMicError('Microphone access denied. Please grant microphone permissions to record your response.');
+      console.error('Microphone permission or recording start error:', err);
+      if (mediaStreamRef.current) {
+        mediaStreamRef.current.getTracks().forEach((track) => track.stop());
+        mediaStreamRef.current = null;
+      }
+      setMicError(
+        err.message || 'Microphone access denied. Please grant microphone permissions to record your response.'
+      );
     }
   };
 
@@ -511,21 +558,33 @@ export default function StudentHomePage() {
   };
 
   const STATUS_LABELS = {
-    IDLE: 'Ready to Raise Hand',
-    WAITING: 'Waiting for Faculty Approval',
-    APPROVED: 'Approved – Ready to Start Recording',
+    IDLE: 'Ready to Record',
     RECORDING: 'Recording in Progress…',
-    COMPLETED: 'Recording Completed',
+    COMPLETED: 'Response Submitted',
   };
 
   const renderActionButton = () => {
     switch (uiState) {
       case UI_STATES.IDLE:
         return (
-          <button className="student-btn" onClick={handleRaiseHand}>
-            Raise Hand
+          <button
+            className="student-btn"
+            onClick={handleStartRecording}
+            style={{
+              padding: '0.75rem 1.75rem',
+              fontSize: '1rem',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              backgroundColor: '#2563eb',
+              boxShadow: '0 2px 4px rgba(37,99,235,0.2)',
+            }}
+          >
+            🎙️ Start Speaking / Record Response
           </button>
         );
+      /* LEGACY RAISE HAND ACTIONS (Kept commented out)
       case UI_STATES.WAITING:
         return (
           <button className="student-btn-cancel" onClick={handleCancel}>
@@ -538,14 +597,45 @@ export default function StudentHomePage() {
             Start Recording
           </button>
         );
+      */
       case UI_STATES.RECORDING:
         return (
-          <button className="student-btn-cancel" onClick={handleStopRecording}>
-            Stop Recording
+          <button
+            className="student-btn-cancel"
+            onClick={handleStopRecording}
+            style={{
+              padding: '0.75rem 1.75rem',
+              fontSize: '1rem',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              backgroundColor: '#dc2626',
+              color: '#ffffff',
+              boxShadow: '0 2px 4px rgba(220,38,38,0.25)',
+            }}
+          >
+            ⏹️ Stop Recording & Submit
           </button>
         );
       case UI_STATES.COMPLETED:
-        return <span className="text-success font-semibold">Done</span>;
+        return (
+          <button
+            className="student-btn"
+            onClick={resetSessionState}
+            style={{
+              padding: '0.65rem 1.25rem',
+              fontSize: '0.95rem',
+              fontWeight: 600,
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.5rem',
+              backgroundColor: '#2563eb',
+            }}
+          >
+            🎙️ Speak Again / New Response
+          </button>
+        );
       default:
         return null;
     }
@@ -652,6 +742,43 @@ export default function StudentHomePage() {
 
       {activeTab === 'PARTICIPATION' && (
         <>
+          {/* Active Discussion Topic Card */}
+          <div
+            style={{
+              margin: '1rem 0 1.25rem 0',
+              padding: '1rem',
+              backgroundColor: '#f0f9ff',
+              borderRadius: '8px',
+              border: '1px solid #bae6fd',
+              borderLeft: '5px solid #0284c7',
+              textAlign: 'left',
+            }}
+          >
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
+              <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                <span style={{ fontSize: '1.1rem' }}>💡</span>
+                <h4 style={{ margin: 0, color: '#0369a1', fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                  Current Discussion Topic
+                </h4>
+              </div>
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, backgroundColor: '#e0f2fe', color: '#0369a1', padding: '0.2rem 0.55rem', borderRadius: '4px' }}>
+                Open Floor
+              </span>
+            </div>
+            <p style={{ margin: '0.2rem 0 0.35rem 0', fontWeight: 600, color: '#0f172a', fontSize: '1.05rem', lineHeight: 1.4 }}>
+              {topic || discussionTopic || 'Open Classroom Discussion'}
+            </p>
+            {(extraInfo || discussionExtraInfo) ? (
+              <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.88rem', color: '#334155', lineHeight: 1.45, borderTop: '1px dashed #bae6fd', paddingTop: '0.35rem' }}>
+                📝 <strong>Guiding Prompt:</strong> {extraInfo || discussionExtraInfo}
+              </p>
+            ) : (
+              <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.82rem', color: '#64748b' }}>
+                Share your perspective, answer questions, or contribute anytime.
+              </p>
+            )}
+          </div>
+
           <p className="status">Status: {STATUS_LABELS[uiState] || uiState}</p>
 
           {micError && (
@@ -660,21 +787,17 @@ export default function StudentHomePage() {
             </div>
           )}
 
-          {(uiState === UI_STATES.APPROVED || uiState === UI_STATES.RECORDING || uiState === UI_STATES.COMPLETED) && topic && (
-            <div style={{ margin: '1rem 0', padding: '0.85rem', backgroundColor: '#e0f2fe', borderRadius: '6px', borderLeft: '4px solid #0284c7', textAlign: 'left' }}>
-              <h4 style={{ margin: '0 0 0.25rem 0', color: '#0369a1', fontSize: '0.95rem' }}>Participation Topic:</h4>
-              <p style={{ margin: 0, fontWeight: 600, color: '#0f172a' }}>{topic}</p>
-              {extraInfo && <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.85rem', color: '#334155' }}>{extraInfo}</p>}
+          {uiState === UI_STATES.RECORDING && (
+            <div style={{ margin: '1rem 0', padding: '0.75rem 1rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '8px', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '0.75rem' }}>
+              <span className="recording-dot" style={{ fontSize: '1.2rem' }}>🔴</span>
+              <span style={{ color: '#b91c1c', fontWeight: 600, fontSize: '0.95rem' }}>
+                Microphone is active — speak clearly! Click Stop when finished.
+              </span>
             </div>
           )}
 
-          <div className="action-container">
+          <div className="action-container" style={{ display: 'flex', justifyContent: 'center', gap: '0.75rem', margin: '1.25rem 0' }}>
             {renderActionButton()}
-            {uiState === UI_STATES.COMPLETED && (
-              <button className="student-btn" onClick={handleBackToParticipation} style={{ marginLeft: '0.75rem' }}>
-                Back to Participation
-              </button>
-            )}
           </div>
 
           {audioUrl && uiState === UI_STATES.COMPLETED && (

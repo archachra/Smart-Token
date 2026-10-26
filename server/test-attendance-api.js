@@ -235,10 +235,11 @@ async function runAttendanceApiTests() {
           [initialBalance, studentId, sectionId]
         )
       }
-      if (typeof unenrolledStudentId !== 'undefined') {
+      if (typeof unenrolledStudentId !== 'undefined' && unenrolledStudentId) {
         await pool.query(`DELETE FROM students WHERE id = $1`, [unenrolledStudentId])
       }
       if (typeof dummyUserRes !== 'undefined' && dummyUserRes?.rows?.[0]?.id) {
+        await pool.query(`DELETE FROM students WHERE user_id = $1`, [dummyUserRes.rows[0].id])
         await pool.query(`DELETE FROM users WHERE id = $1`, [dummyUserRes.rows[0].id])
       }
     } catch (cleanErr) {

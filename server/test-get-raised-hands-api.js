@@ -143,11 +143,14 @@ async function runGetRaisedHandsApiTests() {
         await pool.query('DELETE FROM raised_hands WHERE section_id = $1', [sectionId])
       }
       if (s1Id && s2Id) {
+        await pool.query('DELETE FROM student_balances WHERE student_id IN ($1, $2)', [s1Id, s2Id])
         await pool.query('DELETE FROM enrollments WHERE student_id IN ($1, $2)', [s1Id, s2Id])
         await pool.query('DELETE FROM students WHERE id IN ($1, $2)', [s1Id, s2Id])
       }
-      if (user1?.rows?.[0]?.id && user2?.rows?.[0]?.id) {
-        await pool.query('DELETE FROM users WHERE id IN ($1, $2)', [user1.rows[0].id, user2.rows[0].id])
+      if (user1?.rows?.[0]?.id || user2?.rows?.[0]?.id) {
+        const uids = [user1?.rows?.[0]?.id, user2?.rows?.[0]?.id].filter(Boolean)
+        await pool.query('DELETE FROM students WHERE user_id = ANY($1)', [uids])
+        await pool.query('DELETE FROM users WHERE id = ANY($1)', [uids])
       }
     } catch (cleanErr) {
       console.error('Error during cleanup in test-get-raised-hands-api:', cleanErr)

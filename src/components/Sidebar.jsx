@@ -1,6 +1,8 @@
 import { useState, useEffect } from 'react';
 import { NavLink, useNavigate } from 'react-router-dom';
 import { get } from '../utils/api.js';
+import { getCurrentUser } from '../utils/syncManager.js';
+import { clearUserCache } from '../utils/offlineDb.js';
 
 const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7';
 
@@ -41,6 +43,10 @@ export default function Sidebar() {
   }, []);
 
   const handleLogout = () => {
+    const user = getCurrentUser();
+    if (user?.userId) {
+      clearUserCache(user.userId);
+    }
     localStorage.removeItem('smarttoken_token');
     navigate('/login');
   };

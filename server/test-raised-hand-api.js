@@ -14,7 +14,7 @@ async function runRaisedHandApiTests() {
 
   let server
   const PORT = 3096
-  let sectionId, studentId
+  let sectionId, studentId, dummyUserRes, unenrolledStudentId
 
   try {
     await new Promise((resolve) => {
@@ -131,7 +131,7 @@ async function runRaisedHandApiTests() {
     console.log('✅ Test 2 PASSED: Duplicate active raised hand correctly prevented.\n')
 
     // Test 3: Invalid Enrollment (Unenrolled Student)
-    const dummyUserRes = await pool.query(
+    dummyUserRes = await pool.query(
       `INSERT INTO users (email, name, role) VALUES ($1, $2, $3) RETURNING id`,
       [`unenrolled_rh_${Date.now()}@smarttoken.edu`, 'Unenrolled Student', 'STUDENT']
     )
@@ -139,7 +139,7 @@ async function runRaisedHandApiTests() {
       `INSERT INTO students (user_id, student_id_number, name, email) VALUES ($1, $2, $3, $4) RETURNING id`,
       [dummyUserRes.rows[0].id, `UNENROLLED-RH-${Date.now()}`, 'Unenrolled Student', `unenrolled_rh_${Date.now()}@smarttoken.edu`]
     )
-    const unenrolledStudentId = dummyStudentRes.rows[0].id
+    unenrolledStudentId = dummyStudentRes.rows[0].id
 
     const unenrolledToken = jwt.sign(
       { userId: dummyUserRes.rows[0].id, role: 'STUDENT', email: dummyUserRes.rows[0].email },
@@ -189,6 +189,12 @@ async function runRaisedHandApiTests() {
           `DELETE FROM raised_hands WHERE student_id = $1 AND section_id = $2`,
           [studentId, sectionId]
         )
+      }
+      if (unenrolledStudentId) {
+        await pool.query(`DELETE FROM students WHERE id = $1`, [unenrolledStudentId])
+      }
+      if (dummyUserRes?.rows?.[0]?.id) {
+        await pool.query(`DELETE FROM users WHERE id = $1`, [dummyUserRes.rows[0].id])
       }
     } catch (cleanErr) {
       console.error('Error during test cleanup:', cleanErr)
