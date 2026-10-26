@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { subscribeSyncState, syncNow, PROMPT_SYNC_MS } from '../utils/syncManager.js';
+import ThemeSwitcher from './ThemeSwitcher.jsx';
 
 export default function Header() {
   const [syncState, setSyncState] = useState({
@@ -53,6 +54,7 @@ export default function Header() {
       </div>
 
       <div className="header-actions">
+        <ThemeSwitcher />
         {syncState.authExpired ? (
           <div className="status-indicator auth-expired" title="Authentication expired. Actions preserved locally in queue.">
             <span className="status-dot"></span>

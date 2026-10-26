@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ThemeSwitcher from '../components/ThemeSwitcher.jsx';
 
 // Simple base64url decoder for JWT payload
 function decodeJwtPayload(token) {
@@ -59,6 +60,9 @@ export default function LoginPage() {
 
   return (
     <div className="login-page">
+      <div className="login-top-bar">
+        <ThemeSwitcher />
+      </div>
       <div className="login-card">
         <div className="login-brand">
           <div className="login-logo-circle">🪙</div>
