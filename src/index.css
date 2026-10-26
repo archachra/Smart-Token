@@ -124,6 +124,17 @@ body {
   box-shadow: 0 0 6px #ef4444;
 }
 
+.status-indicator.server-disconnected {
+  background-color: #fffbeb;
+  color: #b45309;
+  border: 1px solid #fde68a;
+}
+
+.status-indicator.server-disconnected .status-dot {
+  background-color: #f59e0b;
+  box-shadow: 0 0 6px #f59e0b;
+}
+
 .status-indicator.syncing {
   background-color: #eff6ff;
   color: #1d4ed8;

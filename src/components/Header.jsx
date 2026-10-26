@@ -54,9 +54,16 @@ export default function Header() {
             <span>⚠️ Auth Expired • Please log in to sync</span>
           </div>
         ) : !syncState.isOnline ? (
-          <div className="status-indicator offline" title="Working offline. Changes are saved locally and will sync when reconnected.">
+          <div
+            className={`status-indicator ${syncState.hasInternet ? 'offline server-disconnected' : 'offline'}`}
+            title={
+              syncState.hasInternet
+                ? 'Your device has internet, but the SmartToken backend server (port 3001) is unreachable. Changes are safely saved locally in IndexedDB.'
+                : 'Working offline without internet. Changes are saved locally and will sync when reconnected.'
+            }
+          >
             <span className="status-dot"></span>
-            <span>Offline (Local Mode)</span>
+            <span>{syncState.hasInternet ? 'Server Disconnected (Local Mode)' : 'Offline (Local Mode)'}</span>
             {syncState.pendingCount > 0 && (
               <span style={{ fontWeight: 600, marginLeft: '0.25rem' }}>
                 • {syncState.pendingCount} queued
