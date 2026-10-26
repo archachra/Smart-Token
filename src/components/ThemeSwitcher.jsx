@@ -22,26 +22,15 @@ export const THEMES = [
     icon: '🪙',
     colors: ['#d97706', '#f59e0b', '#faf9f6'],
   },
-  {
-    id: 'emerald',
-    name: 'Emerald Mint',
-    desc: 'Fresh EduTech teal & mint',
-    icon: '🍃',
-    colors: ['#059669', '#10b981', '#f0fdf4'],
-  },
-  {
-    id: 'default',
-    name: 'Classic Blue',
-    desc: 'Clean enterprise slate & azure',
-    icon: '🔷',
-    colors: ['#2563eb', '#38bdf8', '#f8fafc'],
-  },
 ];
 
 export default function ThemeSwitcher() {
   const [currentTheme, setCurrentTheme] = useState(() => {
     if (typeof window !== 'undefined') {
-      return localStorage.getItem('smarttoken_theme') || 'indigo';
+      const saved = localStorage.getItem('smarttoken_theme');
+      if (THEMES.some((t) => t.id === saved)) {
+        return saved;
+      }
     }
     return 'indigo';
   });

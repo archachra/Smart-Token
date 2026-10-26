@@ -13,8 +13,10 @@
     />
     <script>
       try {
-        const theme = localStorage.getItem('smarttoken_theme') || 'indigo';
-        document.documentElement.setAttribute('data-theme', theme);
+        const theme = localStorage.getItem('smarttoken_theme');
+        const validThemes = ['indigo', 'dark', 'amber'];
+        const activeTheme = validThemes.includes(theme) ? theme : 'indigo';
+        document.documentElement.setAttribute('data-theme', activeTheme);
       } catch (e) {}
     </script>
   </head>
