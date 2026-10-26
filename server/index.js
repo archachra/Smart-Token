@@ -109,6 +109,12 @@ app.post('/api/auth/login', async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' });
   }
 });
+
+// Public health check for client offline detection and connectivity heartbeat
+app.get('/api/health', (req, res) => {
+  res.status(200).json({ status: 'ok', timestamp: new Date().toISOString() });
+});
+
 app.use('/api', authenticate);
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ALLOWED_EVENT_TYPES = ['ATTENDANCE', 'PARTICIPATION', 'TOKEN_AWARD', 'CORRECTION']
@@ -140,7 +146,8 @@ app.get('/api/sections/:sectionId/students', async (req, res) => {
         s.user_id AS "userId",
         s.name,
         s.student_id_number AS "studentIdNumber",
-        COALESCE(sb.balance, 0) AS balance
+        COALESCE(sb.balance, 0) AS balance,
+        COALESCE(e.attendance_status, 'ABSENT') AS "attendanceStatus"
        FROM enrollments e
        JOIN students s ON e.student_id = s.id
        LEFT JOIN student_balances sb ON (sb.student_id = s.id AND sb.section_id = e.section_id)
@@ -419,6 +426,40 @@ app.post('/api/events', async (req, res) => {
     }
     client.release()
 
+    // Handle concurrent duplicate submission where clientEventId was committed in parallel
+    if (err.code === '23505') {
+      try {
+        const raceEvent = await pool.query(
+          `SELECT 
+            e.id,
+            e.client_event_id AS "clientEventId",
+            e.section_id AS "sectionId",
+            e.student_id AS "studentId",
+            e.created_by AS "createdBy",
+            e.event_type AS "eventType",
+            e.token_change AS "tokenChange",
+            e.description,
+            e.created_at AS "createdAt",
+            COALESCE(sb.balance, 0) AS balance
+           FROM events e
+           LEFT JOIN student_balances sb ON (sb.student_id = e.student_id AND sb.section_id = e.section_id)
+           WHERE e.client_event_id = $1`,
+          [clientEventId]
+        )
+        if (raceEvent.rowCount > 0) {
+          const row = raceEvent.rows[0]
+          const { balance, ...eventData } = row
+          return res.status(200).json({
+            event: eventData,
+            balance,
+            idempotent: true,
+          })
+        }
+      } catch (raceErr) {
+        console.error('Error checking concurrent event idempotency:', raceErr)
+      }
+    }
+
     console.error('Transaction error processing token event:', err)
     return res.status(500).json({ error: 'Transaction failed while recording token event' })
   }
@@ -550,6 +591,33 @@ app.patch('/api/sections/:sectionId/students/:studentId/attendance', async (req,
       console.error('Error rolling back attendance transaction:', rollbackErr)
     }
     client.release()
+
+    // Handle concurrent duplicate submission where clientEventId was committed in parallel
+    if (err.code === '23505') {
+      try {
+        const raceEvent = await pool.query(
+          `SELECT 
+            e.id,
+            e.client_event_id AS "clientEventId",
+            en.attendance_status AS "attendanceStatus",
+            COALESCE(sb.balance, 0) AS balance
+           FROM events e
+           JOIN enrollments en ON (en.student_id = e.student_id AND en.section_id = e.section_id)
+           LEFT JOIN student_balances sb ON (sb.student_id = e.student_id AND sb.section_id = e.section_id)
+           WHERE e.client_event_id = $1`,
+          [clientEventId]
+        )
+        if (raceEvent.rowCount > 0) {
+          return res.status(200).json({
+            status: raceEvent.rows[0].attendanceStatus,
+            balance: raceEvent.rows[0].balance,
+            idempotent: true,
+          })
+        }
+      } catch (raceErr) {
+        console.error('Error checking concurrent attendance idempotency:', raceErr)
+      }
+    }
 
     console.error('Transaction error updating attendance:', err)
     return res.status(500).json({ error: 'Transaction failed while updating attendance' })
@@ -698,6 +766,165 @@ app.delete('/api/sections/:sectionId/participation/raised/:requestId', async (re
   } catch (err) {
     console.error('Error removing raised-hand request:', err)
     return res.status(500).json({ error: 'Internal server error while removing raised hand' })
+  }
+})
+
+// GET /api/sections/:sectionId/participation/topic - Fetch current discussion topic and extra info
+app.get('/api/sections/:sectionId/participation/topic', async (req, res) => {
+  const { sectionId } = req.params
+  if (!sectionId || !UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid or missing sectionId UUID' })
+  }
+
+  try {
+    const secResult = await pool.query(
+      `SELECT active_topic AS "topic", active_extra_info AS "extraInfo" FROM sections WHERE id = $1`,
+      [sectionId]
+    )
+
+    if (secResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Section not found' })
+    }
+
+    return res.status(200).json({
+      topic: secResult.rows[0].topic || '',
+      extraInfo: secResult.rows[0].extraInfo || '',
+    })
+  } catch (err) {
+    console.error('Error fetching section active topic:', err)
+    return res.status(500).json({ error: 'Internal server error while fetching topic' })
+  }
+})
+
+// PUT /api/sections/:sectionId/participation/topic - Faculty sets the discussion topic and extra info
+app.put('/api/sections/:sectionId/participation/topic', async (req, res) => {
+  const { sectionId } = req.params
+  const { topic, extraInfo } = req.body || {}
+
+  if (req.user.role !== 'FACULTY' && req.user.role !== 'ADMIN') {
+    return res.status(403).json({ error: 'Forbidden: faculty or admin role required' })
+  }
+
+  if (!sectionId || !UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid or missing sectionId UUID' })
+  }
+
+  try {
+    const updateResult = await pool.query(
+      `UPDATE sections
+       SET active_topic = $1, active_extra_info = $2, updated_at = NOW()
+       WHERE id = $3
+       RETURNING id, active_topic AS "topic", active_extra_info AS "extraInfo"`,
+      [topic ? topic.trim() : null, extraInfo ? extraInfo.trim() : null, sectionId]
+    )
+
+    if (updateResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Section not found' })
+    }
+
+    return res.status(200).json({
+      topic: updateResult.rows[0].topic || '',
+      extraInfo: updateResult.rows[0].extraInfo || '',
+    })
+  } catch (err) {
+    console.error('Error updating section active topic:', err)
+    return res.status(500).json({ error: 'Internal server error while updating topic' })
+  }
+})
+
+// POST /api/sections/:sectionId/participation/recordings - Direct recording session creation (Student or Faculty)
+app.post('/api/sections/:sectionId/participation/recordings', async (req, res) => {
+  const { sectionId } = req.params
+  const { studentId: reqStudentId, topic: reqTopic, extraInfo: reqExtraInfo } = req.body || {}
+
+  if (!sectionId || !UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid or missing sectionId UUID' })
+  }
+
+  try {
+    // 1. Fetch section and active topic/extraInfo
+    const secResult = await pool.query(
+      `SELECT id, active_topic AS "topic", active_extra_info AS "extraInfo" FROM sections WHERE id = $1`,
+      [sectionId]
+    )
+    if (secResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Section not found' })
+    }
+
+    const sectionData = secResult.rows[0]
+    let targetStudentId = null
+    let recordingSource = 'STUDENT_DEVICE'
+
+    // 2. Identify target student and source based on caller role
+    if (req.user.role === 'STUDENT') {
+      const studentLookup = await pool.query(`SELECT id FROM students WHERE user_id = $1`, [req.user.userId])
+      if (studentLookup.rowCount === 0) {
+        return res.status(403).json({ error: 'Student profile not found for authenticated user' })
+      }
+      targetStudentId = studentLookup.rows[0].id
+      recordingSource = 'STUDENT_DEVICE'
+
+      // Check enrollment
+      const enrollCheck = await pool.query(
+        `SELECT 1 FROM enrollments WHERE section_id = $1 AND student_id = $2`,
+        [sectionId, targetStudentId]
+      )
+      if (enrollCheck.rowCount === 0) {
+        return res.status(400).json({ error: 'Student is not enrolled in this section' })
+      }
+    } else if (req.user.role === 'FACULTY' || req.user.role === 'ADMIN') {
+      if (!reqStudentId || !UUID_REGEX.test(reqStudentId)) {
+        return res.status(400).json({ error: 'Valid studentId UUID is required for faculty recording' })
+      }
+      targetStudentId = reqStudentId
+      recordingSource = 'FACULTY_DEVICE'
+
+      // Verify student enrolled in section
+      const enrollCheck = await pool.query(
+        `SELECT 1 FROM enrollments WHERE section_id = $1 AND student_id = $2`,
+        [sectionId, targetStudentId]
+      )
+      if (enrollCheck.rowCount === 0) {
+        return res.status(400).json({ error: 'Specified student is not enrolled in this section' })
+      }
+    } else {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+
+    // 3. Resolve topic and extraInfo
+    const finalTopic = (reqTopic && reqTopic.trim()) || sectionData.topic || 'Class Discussion'
+    const finalExtraInfo = (reqExtraInfo && reqExtraInfo.trim()) || sectionData.extraInfo || null
+
+    // 4. Create RECORDING session
+    const insertResult = await pool.query(
+      `INSERT INTO recording_sessions (section_id, student_id, raised_hand_id, status, recording_source, topic, extra_info, started_at)
+       VALUES ($1, $2, NULL, 'RECORDING', $3, $4, $5, NOW())
+       RETURNING 
+        id, 
+        section_id AS "sectionId", 
+        student_id AS "studentId", 
+        raised_hand_id AS "raisedHandId", 
+        status, 
+        recording_source AS "recordingSource", 
+        topic,
+        extra_info AS "extraInfo",
+        audio_url AS "audioUrl",
+        transcript,
+        transcription_status AS "transcriptionStatus",
+        transcription_error AS "transcriptionError",
+        transcribed_at AS "transcribedAt",
+        created_at AS "createdAt", 
+        started_at AS "startedAt", 
+        ended_at AS "endedAt"`,
+      [sectionId, targetStudentId, recordingSource, finalTopic, finalExtraInfo]
+    )
+
+    return res.status(201).json({
+      session: insertResult.rows[0],
+    })
+  } catch (err) {
+    console.error('Error creating direct recording session:', err)
+    return res.status(500).json({ error: 'Internal server error while creating recording session' })
   }
 })
 

@@ -17,6 +17,7 @@ dist-ssr
 !.env.example
 
 # Editor directories and files
+*.traineddata
 .vscode/*
 !.vscode/extensions.json
 .idea

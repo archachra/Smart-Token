@@ -70,6 +70,24 @@ export async function patch(url, body) {
   return await res.json();
 }
 
+export async function put(url, body) {
+  const res = await fetch(url, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: getAuthHeaders({
+      'Content-Type': 'application/json',
+      'Accept': 'application/json',
+    }),
+    body: JSON.stringify(body),
+  });
+  handleAuthFailure(res);
+  if (!res.ok) {
+    const text = await res.text();
+    throw new Error(`PUT ${url} failed: ${res.status} ${text}`);
+  }
+  return await res.json();
+}
+
 export async function del(url) {
   const res = await fetch(url, {
     method: 'DELETE',

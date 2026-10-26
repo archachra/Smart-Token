@@ -36,7 +36,7 @@ export const ATTENDANCE_STORAGE_KEY = 'smarttoken_demo_attendance'
 
 export const createDemoRoster = () =>
   DEMO_STUDENT_NAMES.map((name, index) => ({
-    id: index + 1,
+    id: `demo-${index + 1}`,
     rollNumber: `CS101-${String(index + 1).padStart(3, '0')}`,
     name,
     isPresent: true,
