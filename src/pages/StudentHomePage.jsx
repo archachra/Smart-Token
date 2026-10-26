@@ -690,11 +690,11 @@ export default function StudentHomePage() {
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', padding: '2rem 1rem' }}>
       <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-        <div className="student-card">
+        <div className="student-portal-card">
           <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
             <button className="student-btn-cancel" onClick={handleLogout}>Logout</button>
           </div>
-      <h2 className="student-header">{student.name}</h2>
+      <h2 className="student-portal-header">{student.name}</h2>
       <p className="student-id">
         Roll / ID: {student.studentIdNumber || student.studentId || student.id}
       </p>
