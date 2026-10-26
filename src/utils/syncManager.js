@@ -17,6 +17,9 @@ import {
 } from './offlineDb.js';
 
 let isOnline = typeof navigator !== 'undefined' ? navigator.onLine : true;
+let hasInternet = typeof navigator !== 'undefined' ? navigator.onLine : true;
+let serverReachable = true;
+let consecutiveProbeFailures = 0;
 let isSyncing = false;
 let isDrainRunning = false;
 let pendingCount = 0;
@@ -36,6 +39,8 @@ export function getIsOnline() {
 export function getSyncState() {
   return {
     isOnline,
+    hasInternet: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    serverReachable,
     isSyncing,
     pendingCount,
     permanentErrorsCount,
@@ -71,6 +76,8 @@ export function getCurrentUser() {
 function broadcastState() {
   const state = {
     isOnline,
+    hasInternet: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    serverReachable,
     isSyncing,
     pendingCount,
     permanentErrorsCount,
@@ -101,6 +108,8 @@ export function subscribeSyncState(callback) {
   // Send initial state immediately
   callback({
     isOnline,
+    hasInternet: typeof navigator !== 'undefined' ? navigator.onLine : true,
+    serverReachable,
     isSyncing,
     pendingCount,
     permanentErrorsCount,
@@ -114,12 +123,27 @@ export function subscribeSyncState(callback) {
 
 /**
  * Actively probe backend reachability via public /api/health endpoint.
- * Does not rely merely on navigator.onLine.
+ * Requires 2 consecutive failures before declaring offline when browser reports having network,
+ * preventing transient network latency or aborted fetches from falsely flipping the UI.
  */
 export async function checkReachability() {
+  const browserHasNet = typeof navigator !== 'undefined' ? navigator.onLine : true;
+  hasInternet = browserHasNet;
+
+  // If the browser explicitly reports offline (no Wi-Fi/cable), immediately set offline
+  if (!browserHasNet) {
+    consecutiveProbeFailures = 2;
+    if (isOnline || serverReachable) {
+      isOnline = false;
+      serverReachable = false;
+      broadcastState();
+    }
+    return false;
+  }
+
   try {
     const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), 3500);
+    const timer = setTimeout(() => controller.abort(), 6000);
 
     const res = await fetch('/api/health', {
       method: 'GET',
@@ -130,18 +154,35 @@ export async function checkReachability() {
     clearTimeout(timer);
 
     const reached = res.ok;
-    if (isOnline !== reached) {
-      isOnline = reached;
-      broadcastState();
-      if (reached && pendingCount > 0) {
-        drainQueue().catch((e) => console.warn('[SyncManager] Auto-drain on reachability restoration:', e));
+    if (reached) {
+      consecutiveProbeFailures = 0;
+      serverReachable = true;
+      if (!isOnline) {
+        isOnline = true;
+        broadcastState();
+        if (pendingCount > 0) {
+          drainQueue().catch((e) => console.warn('[SyncManager] Auto-drain on reachability restoration:', e));
+        }
+      }
+    } else {
+      consecutiveProbeFailures++;
+      if (consecutiveProbeFailures >= 2) {
+        serverReachable = false;
+        if (isOnline) {
+          isOnline = false;
+          broadcastState();
+        }
       }
     }
     return reached;
   } catch {
-    if (isOnline) {
-      isOnline = false;
-      broadcastState();
+    consecutiveProbeFailures++;
+    if (consecutiveProbeFailures >= 2) {
+      serverReachable = false;
+      if (isOnline) {
+        isOnline = false;
+        broadcastState();
+      }
     }
     return false;
   }
@@ -382,13 +423,17 @@ export function initSyncEngine() {
   refreshPendingCounts();
 
   window.addEventListener('online', () => {
+    hasInternet = true;
     checkReachability().then((ok) => {
       if (ok) syncNow();
     });
   });
 
   window.addEventListener('offline', () => {
+    hasInternet = false;
     isOnline = false;
+    serverReachable = false;
+    consecutiveProbeFailures = 2;
     broadcastState();
   });
 
@@ -398,12 +443,22 @@ export function initSyncEngine() {
     });
   });
 
-  // Periodic heartbeat: faster when offline or pending, standard 15s when idle
-  setInterval(() => {
-    checkReachability().then((ok) => {
-      if (ok && pendingCount > 0 && !isSyncing) {
-        drainQueue();
+  // Dynamic heartbeat: 4s when offline/pending, 12s when idle and online
+  let heartbeatTimer = null;
+  function scheduleHeartbeat() {
+    if (heartbeatTimer) clearTimeout(heartbeatTimer);
+    const delay = (!isOnline || pendingCount > 0 || isSyncing) ? 4000 : 12000;
+    heartbeatTimer = setTimeout(async () => {
+      try {
+        const ok = await checkReachability();
+        if (ok && pendingCount > 0 && !isSyncing) {
+          drainQueue().catch(() => {});
+        }
+      } finally {
+        scheduleHeartbeat();
       }
-    });
-  }, 3000);
+    }, delay);
+  }
+
+  scheduleHeartbeat();
 }
