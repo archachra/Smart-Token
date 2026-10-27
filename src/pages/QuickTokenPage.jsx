@@ -12,7 +12,11 @@ import {
   getCachedRoster,
   getPendingActionsForSection,
 } from '../utils/offlineDb.js'
-import { recordStudentAward, getRecentlySelectedStudents } from '../utils/recentStudents.js'
+import {
+  recordStudentAward,
+  recordStudentCorrection,
+  getRecentlySelectedStudents,
+} from '../utils/recentStudents.js'
 
 const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 
@@ -274,6 +278,9 @@ export default function QuickTokenPage() {
   const handleSubtractToken = async (id) => {
     const target = students.find((s) => s.id === id)
     if (!target) return
+
+    recordStudentCorrection(target)
+    setRecentTrigger((c) => c + 1)
 
     const studentId = target.backendId
     const clientEventId = crypto.randomUUID()

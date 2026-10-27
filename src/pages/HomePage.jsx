@@ -16,8 +16,8 @@ const COLOR_PALETTE = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#db2777', '#
 
 const initialStudents = createDemoRoster().map((student, index) => ({
   ...student,
-  tokens: [4, 7, 3, 5, 2][index] || 0,
-  balance: [4, 7, 3, 5, 2][index] || 0,
+  tokens: 0,
+  balance: 0,
   initials: student.name.split(' ').map((part) => part[0]).join('').slice(0, 2).toUpperCase(),
   color: COLOR_PALETTE[index % COLOR_PALETTE.length],
 }))

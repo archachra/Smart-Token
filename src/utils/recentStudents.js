@@ -1,31 +1,41 @@
 /**
  * Utility for managing and ranking recently & frequently selected students.
  * Synchronizes between Quick Token page and Home page via localStorage and custom window events.
+ * 
+ * NOTE: Lifetime total token balances do NOT affect ranking.
+ * Only the frequency of tokens awarded over the recent session ("over a day or so", rolling 36h)
+ * determines priority, with recency serving as the tie-breaker.
  */
 
 const RECENT_AWARDS_KEY = 'smarttoken_recent_awards';
 
+// Rolling window for "over a day or so" (36 hours)
+export const RECENT_WINDOW_MS = 36 * 60 * 60 * 1000;
+
 /**
- * Record a token award action for a student to boost their recency & frequency.
+ * Record a token award action for a student, updating their rolling timestamps.
  */
 export function recordStudentAward(student) {
   if (!student) return;
   const id = student.backendId || student.id || student.studentIdNumber || student.rollNumber;
   const name = (student.name || '').toLowerCase().trim();
+  const now = Date.now();
 
   try {
     const raw = localStorage.getItem(RECENT_AWARDS_KEY);
     const map = raw ? JSON.parse(raw) : {};
 
-    const existing = map[id] || map[name] || { count: 0, lastAwardedAt: 0 };
-    const currentTokens = Number(student.tokens ?? student.balance ?? 0) + 1;
-    const newCount = Math.max((existing.count || 0) + 1, currentTokens);
+    const existing = map[id] || map[name] || { timestamps: [] };
+    const validTimestamps = (existing.timestamps || [])
+      .filter((t) => typeof t === 'number' && now - t <= RECENT_WINDOW_MS);
+    validTimestamps.push(now);
 
     const updated = {
       id,
       name: student.name,
-      count: newCount,
-      lastAwardedAt: Date.now(),
+      timestamps: validTimestamps,
+      count: validTimestamps.length,
+      lastAwardedAt: now,
     };
 
     map[id] = updated;
@@ -35,6 +45,45 @@ export function recordStudentAward(student) {
     window.dispatchEvent(new CustomEvent('recent-students-updated', { detail: updated }));
   } catch (err) {
     console.warn('Failed to record student award in localStorage:', err);
+  }
+}
+
+/**
+ * Record a token correction / decrement for a student, rolling back their latest award.
+ */
+export function recordStudentCorrection(student) {
+  if (!student) return;
+  const id = student.backendId || student.id || student.studentIdNumber || student.rollNumber;
+  const name = (student.name || '').toLowerCase().trim();
+  const now = Date.now();
+
+  try {
+    const raw = localStorage.getItem(RECENT_AWARDS_KEY);
+    const map = raw ? JSON.parse(raw) : {};
+
+    const existing = map[id] || map[name] || { timestamps: [] };
+    const validTimestamps = (existing.timestamps || [])
+      .filter((t) => typeof t === 'number' && now - t <= RECENT_WINDOW_MS);
+
+    if (validTimestamps.length > 0) {
+      validTimestamps.pop();
+    }
+
+    const updated = {
+      id,
+      name: student.name,
+      timestamps: validTimestamps,
+      count: validTimestamps.length,
+      lastAwardedAt: validTimestamps[validTimestamps.length - 1] || 0,
+    };
+
+    map[id] = updated;
+    if (name) map[name] = updated;
+
+    localStorage.setItem(RECENT_AWARDS_KEY, JSON.stringify(map));
+    window.dispatchEvent(new CustomEvent('recent-students-updated', { detail: updated }));
+  } catch (err) {
+    console.warn('Failed to record student correction in localStorage:', err);
   }
 }
 
@@ -51,22 +100,27 @@ export function getRecentAwardMap() {
 }
 
 /**
- * Rank a list of students so that students who frequently get tokens stay at the top,
- * with recency used to rank newly active students and break ties.
- * High-frequency students (e.g. 10 awards) will not be abruptly overtaken by a student receiving 1 award.
+ * Rank students based strictly on award frequency in the last day or so (rolling 36 hours).
+ * Total lifetime tokens are completely ignored.
  */
 export function rankStudentsByActivity(students = [], events = []) {
   if (!Array.isArray(students) || students.length === 0) return [];
 
+  const now = Date.now();
   const localMap = getRecentAwardMap();
 
-  // Aggregate event ledger stats for each student
+  // Aggregate event ledger stats strictly within the recent window (last 36 hours)
   const eventMap = {};
   if (Array.isArray(events)) {
     for (const evt of events) {
+      const time = new Date(evt.createdAt || evt.created_at || 0).getTime();
+      // Ignore historical events older than 36 hours
+      if (now - time > RECENT_WINDOW_MS) {
+        continue;
+      }
+
       const studentId = evt.studentId || evt.student_id;
       const studentName = (evt.studentName || evt.name || '').toLowerCase().trim();
-      const time = new Date(evt.createdAt || evt.created_at || 0).getTime();
       const change = Number(evt.tokenChange ?? evt.token_change ?? 0);
 
       const keys = [studentId, studentName].filter(Boolean);
@@ -76,6 +130,8 @@ export function rankStudentsByActivity(students = [], events = []) {
         }
         if (change > 0) {
           eventMap[k].count += change;
+        } else if (change < 0) {
+          eventMap[k].count = Math.max(0, eventMap[k].count + change);
         }
         if (time > eventMap[k].lastAwardedAt) {
           eventMap[k].lastAwardedAt = time;
@@ -97,22 +153,29 @@ export function rankStudentsByActivity(students = [], events = []) {
     const aLocal = localMap[aId] || localMap[aName] || localMap[aRoll];
     const bLocal = localMap[bId] || localMap[bName] || localMap[bRoll];
 
+    // Count local awards within the rolling window
+    const aLocalCount = (aLocal?.timestamps || [])
+      .filter((t) => typeof t === 'number' && now - t <= RECENT_WINDOW_MS).length || (
+        aLocal?.lastAwardedAt && (now - aLocal.lastAwardedAt <= RECENT_WINDOW_MS) ? aLocal.count : 0
+      );
+    const bLocalCount = (bLocal?.timestamps || [])
+      .filter((t) => typeof t === 'number' && now - t <= RECENT_WINDOW_MS).length || (
+        bLocal?.lastAwardedAt && (now - bLocal.lastAwardedAt <= RECENT_WINDOW_MS) ? bLocal.count : 0
+      );
+
     const aEvt = eventMap[aId] || eventMap[aName];
     const bEvt = eventMap[bId] || eventMap[bName];
 
-    // Compute total award frequency (from local clicks, ledger events, and token balance)
-    const aTokens = Number(a.tokens ?? a.balance ?? 0);
-    const bTokens = Number(b.tokens ?? b.balance ?? 0);
+    // Recent award frequency over the last day or so (NO LIFETIME TOKENS INVOLVED)
+    const aFreq = Math.max(aLocalCount, aEvt?.count || 0);
+    const bFreq = Math.max(bLocalCount, bEvt?.count || 0);
 
-    const aFreq = Math.max(aLocal?.count || 0, aEvt?.count || 0, aTokens);
-    const bFreq = Math.max(bLocal?.count || 0, bEvt?.count || 0, bTokens);
-
-    // 1. Primary: Higher frequency stays at the top (e.g. 10 tokens > 1 token)
+    // 1. Primary: Frequency of awarding over the last day or so
     if (aFreq !== bFreq) {
       return bFreq - aFreq;
     }
 
-    // 2. Secondary / Tie-breaker: Among students with equal frequency, the more recently awarded student comes first
+    // 2. Secondary / Tie-breaker: Among students with equal recent frequency, the more recently awarded student comes first
     const aLastTime = Math.max(aLocal?.lastAwardedAt || 0, aEvt?.lastAwardedAt || 0);
     const bLastTime = Math.max(bLocal?.lastAwardedAt || 0, bEvt?.lastAwardedAt || 0);
 
