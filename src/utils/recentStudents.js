@@ -133,9 +133,10 @@ export function rankStudentsByActivity(students = [], events = []) {
 
       const studentId = evt.studentId || evt.student_id;
       const studentName = (evt.studentName || evt.name || '').toLowerCase().trim();
+      const studentRoll = (evt.rollNumber || evt.student_id_number || '').toLowerCase().trim();
       const change = Number(evt.tokenChange ?? evt.token_change ?? 0);
 
-      const keys = [studentId, studentName].filter(Boolean);
+      const keys = [studentId, studentName, studentRoll].filter(Boolean);
       for (const k of keys) {
         if (!eventMap[k]) {
           eventMap[k] = { count: 0, lastAwardedAt: 0 };
@@ -152,6 +153,22 @@ export function rankStudentsByActivity(students = [], events = []) {
     }
   }
 
+  // Auto-prune stale localStorage ghost entries that have no matching ledger events or current tokens
+  if (Array.isArray(events) && events.length > 0) {
+    let pruned = false;
+    for (const key of Object.keys(localMap)) {
+      if (!eventMap[key]) {
+        delete localMap[key];
+        pruned = true;
+      }
+    }
+    if (pruned) {
+      try {
+        localStorage.setItem(RECENT_AWARDS_KEY, JSON.stringify(localMap));
+      } catch {}
+    }
+  }
+
   // Clone and sort students
   return [...students].sort((a, b) => {
     const aId = a.backendId || a.id;
@@ -165,22 +182,34 @@ export function rankStudentsByActivity(students = [], events = []) {
     const aLocal = localMap[aId] || localMap[aName] || localMap[aRoll];
     const bLocal = localMap[bId] || localMap[bName] || localMap[bRoll];
 
+    const aEvt = eventMap[aId] || eventMap[aName] || eventMap[aRoll];
+    const bEvt = eventMap[bId] || eventMap[bName] || eventMap[bRoll];
+
+    const aEvtCount = aEvt?.count || 0;
+    const bEvtCount = bEvt?.count || 0;
+
     // Count local awards within the rolling window
-    const aLocalCount = (aLocal?.timestamps || [])
+    let aLocalCount = (aLocal?.timestamps || [])
       .filter((t) => typeof t === 'number' && now - t <= RECENT_WINDOW_MS).length || (
         aLocal?.lastAwardedAt && (now - aLocal.lastAwardedAt <= RECENT_WINDOW_MS) ? aLocal.count : 0
       );
-    const bLocalCount = (bLocal?.timestamps || [])
+    let bLocalCount = (bLocal?.timestamps || [])
       .filter((t) => typeof t === 'number' && now - t <= RECENT_WINDOW_MS).length || (
         bLocal?.lastAwardedAt && (now - bLocal.lastAwardedAt <= RECENT_WINDOW_MS) ? bLocal.count : 0
       );
 
-    const aEvt = eventMap[aId] || eventMap[aName];
-    const bEvt = eventMap[bId] || eventMap[bName];
+    // If a student has ZERO events on the ledger and ZERO current tokens,
+    // residual localStorage entries from an old wiped session are invalid ghosts and must be discarded.
+    if (aEvtCount === 0 && (Number(a.tokens) || 0) === 0 && (a.pendingDelta || 0) === 0) {
+      aLocalCount = 0;
+    }
+    if (bEvtCount === 0 && (Number(b.tokens) || 0) === 0 && (b.pendingDelta || 0) === 0) {
+      bLocalCount = 0;
+    }
 
-    // Recent award frequency over the last day or so (NO LIFETIME TOKENS INVOLVED)
-    const aFreq = Math.max(aLocalCount, aEvt?.count || 0);
-    const bFreq = Math.max(bLocalCount, bEvt?.count || 0);
+    // Recent award frequency over the last day or so
+    const aFreq = Math.max(aLocalCount, aEvtCount);
+    const bFreq = Math.max(bLocalCount, bEvtCount);
 
     // 1. Primary: Frequency of awarding over the last day or so
     if (aFreq !== bFreq) {
