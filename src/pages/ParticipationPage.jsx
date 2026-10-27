@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
-import { get, post, put, patch } from '../utils/api.js'
+import { get, post, put, patch, del, postFormData } from '../utils/api.js'
 import { CLASS_3Q13_STUDENTS } from '../data/demoStudents'
 
 // Section ID (hard‑coded for demo)
@@ -28,6 +28,17 @@ export default function ParticipationPage() {
   const [extraInfo, setExtraInfo] = useState('')
   const [isSavingTopic, setIsSavingTopic] = useState(false)
   const [topicMessage, setTopicMessage] = useState(null)
+
+  // Reference Material for AI Answer Evaluation
+  const [materialName, setMaterialName] = useState(null)
+  const [materialText, setMaterialText] = useState(null)
+  const [isUploadingMaterial, setIsUploadingMaterial] = useState(false)
+  const [materialInputMode, setMaterialInputMode] = useState('file') // 'file' | 'text'
+  const [manualMaterialName, setManualMaterialName] = useState('')
+  const [manualMaterialText, setManualMaterialText] = useState('')
+  const [showMaterialPreview, setShowMaterialPreview] = useState(false)
+  const [materialFeedback, setMaterialFeedback] = useState(null)
+  const fileInputRef = useRef(null)
 
   // In-Class "Record from Here" state
   const [recordingStudentId, setRecordingStudentId] = useState(null)
@@ -136,20 +147,22 @@ export default function ParticipationPage() {
     loadRoster()
   }, [])
 
-  // Load current discussion topic on mount
+  // Load current discussion topic and reference material on mount
   useEffect(() => {
-    async function fetchTopic() {
+    async function fetchTopicAndMaterial() {
       try {
         const data = await get(`/api/sections/${SECTION_ID}/participation/topic`)
         if (data) {
           setTopic(data.topic || '')
           setExtraInfo(data.extraInfo || '')
+          setMaterialName(data.materialName || null)
+          setMaterialText(data.materialText || null)
         }
       } catch (err) {
-        console.error('Failed to load active discussion topic:', err)
+        console.error('Failed to load active discussion topic & material:', err)
       }
     }
-    fetchTopic()
+    fetchTopicAndMaterial()
   }, [])
 
   // Cleanup media stream and timers on unmount
@@ -179,6 +192,72 @@ export default function ParticipationPage() {
       setTopicMessage({ type: 'error', text: err.message || 'Failed to save topic' })
     } finally {
       setIsSavingTopic(false)
+    }
+  }
+
+  // Upload reference document (PDF, DOCX, TXT, MD, CSV)
+  const handleFileUpload = async (e) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setIsUploadingMaterial(true)
+    setMaterialFeedback(null)
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+      const res = await postFormData(`/api/sections/${SECTION_ID}/participation/material`, formData)
+      setMaterialName(res.materialName)
+      setMaterialText(res.materialText)
+      setMaterialFeedback({ type: 'success', text: `✅ Uploaded "${res.materialName}" (${res.wordCount} words for AI evaluation)` })
+      setTimeout(() => setMaterialFeedback(null), 4000)
+    } catch (err) {
+      console.error('Error uploading material:', err)
+      setMaterialFeedback({ type: 'error', text: err.message || 'Failed to upload material' })
+    } finally {
+      setIsUploadingMaterial(false)
+      if (fileInputRef.current) fileInputRef.current.value = ''
+    }
+  }
+
+  // Save raw typed or pasted reference material text
+  const handleSaveManualMaterial = async () => {
+    if (!manualMaterialText.trim()) return
+    setIsUploadingMaterial(true)
+    setMaterialFeedback(null)
+    try {
+      const res = await post(`/api/sections/${SECTION_ID}/participation/material`, {
+        text: manualMaterialText.trim(),
+        materialName: manualMaterialName.trim() || 'Reference Notes',
+      })
+      setMaterialName(res.materialName)
+      setMaterialText(res.materialText)
+      setManualMaterialText('')
+      setManualMaterialName('')
+      setMaterialFeedback({ type: 'success', text: `✅ Reference material saved (${res.wordCount} words for AI evaluation)` })
+      setTimeout(() => setMaterialFeedback(null), 4000)
+    } catch (err) {
+      console.error('Error saving reference notes:', err)
+      setMaterialFeedback({ type: 'error', text: err.message || 'Failed to save reference notes' })
+    } finally {
+      setIsUploadingMaterial(false)
+    }
+  }
+
+  // Clear active reference material
+  const handleClearMaterial = async () => {
+    if (!window.confirm('Clear reference material from this session? AI will evaluate based only on topic and prompt.')) return
+    setIsUploadingMaterial(true)
+    try {
+      await del(`/api/sections/${SECTION_ID}/participation/material`)
+      setMaterialName(null)
+      setMaterialText(null)
+      setShowMaterialPreview(false)
+      setMaterialFeedback({ type: 'success', text: 'Reference material cleared' })
+      setTimeout(() => setMaterialFeedback(null), 3000)
+    } catch (err) {
+      console.error('Error clearing reference material:', err)
+      setMaterialFeedback({ type: 'error', text: err.message || 'Failed to clear reference material' })
+    } finally {
+      setIsUploadingMaterial(false)
     }
   }
 
@@ -491,6 +570,254 @@ export default function ParticipationPage() {
                   fontFamily: 'inherit',
                 }}
               />
+            </div>
+
+            {/* Reference Material / Answer Key for AI evaluation */}
+            <div style={{
+              display: 'flex',
+              flexDirection: 'column',
+              gap: '0.5rem',
+              padding: '0.75rem',
+              backgroundColor: 'var(--bg-secondary, #f8fafc)',
+              borderRadius: '8px',
+              border: '1px solid var(--border-color, #e2e8f0)'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                <label style={{ fontWeight: 600, fontSize: '0.85rem', color: '#1e293b', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
+                  <span>📚</span> Reference Material / Answer Key
+                </label>
+                {materialText && (
+                  <span style={{ fontSize: '0.72rem', color: '#15803d', fontWeight: 600, backgroundColor: '#dcfce7', padding: '0.15rem 0.45rem', borderRadius: '4px' }}>
+                    Active
+                  </span>
+                )}
+              </div>
+              <p style={{ margin: 0, fontSize: '0.76rem', color: '#64748b', lineHeight: 1.35 }}>
+                AI evaluator checks student answers against this document or notes to verify factual correctness.
+              </p>
+
+              {/* Uploaded Material Card */}
+              {materialText ? (
+                <div style={{
+                  display: 'flex',
+                  flexDirection: 'column',
+                  gap: '0.4rem',
+                  padding: '0.6rem 0.75rem',
+                  backgroundColor: '#ffffff',
+                  border: '1px solid #bbf7d0',
+                  borderRadius: '6px',
+                }}>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem', minWidth: 0 }}>
+                      <span style={{ fontSize: '1.1rem' }}>📄</span>
+                      <span style={{ fontSize: '0.82rem', fontWeight: 600, color: '#15803d', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '170px' }}>
+                        {materialName || 'Uploaded Reference'}
+                      </span>
+                    </div>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
+                      <button
+                        type="button"
+                        onClick={() => setShowMaterialPreview(!showMaterialPreview)}
+                        style={{
+                          fontSize: '0.72rem',
+                          padding: '0.2rem 0.45rem',
+                          background: '#f1f5f9',
+                          border: '1px solid #cbd5e1',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 500,
+                        }}
+                      >
+                        {showMaterialPreview ? 'Hide' : 'Preview'}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={handleClearMaterial}
+                        disabled={isUploadingMaterial}
+                        style={{
+                          fontSize: '0.75rem',
+                          padding: '0.2rem 0.45rem',
+                          background: '#fee2e2',
+                          color: '#dc2626',
+                          border: '1px solid #fecaca',
+                          borderRadius: '4px',
+                          cursor: 'pointer',
+                          fontWeight: 600,
+                        }}
+                        title="Remove reference material"
+                      >
+                        ✕
+                      </button>
+                    </div>
+                  </div>
+
+                  <div style={{ display: 'flex', gap: '0.5rem', fontSize: '0.72rem', color: '#64748b' }}>
+                    <span>{materialText.split(/\s+/).filter(Boolean).length} words</span>
+                    <span>•</span>
+                    <span>{materialText.length} chars</span>
+                  </div>
+
+                  {showMaterialPreview && (
+                    <div style={{
+                      marginTop: '0.35rem',
+                      maxHeight: '140px',
+                      overflowY: 'auto',
+                      fontSize: '0.75rem',
+                      color: '#334155',
+                      backgroundColor: '#f8fafc',
+                      padding: '0.5rem',
+                      borderRadius: '4px',
+                      border: '1px solid #e2e8f0',
+                      whiteSpace: 'pre-wrap',
+                      lineHeight: 1.4,
+                      fontFamily: 'monospace'
+                    }}>
+                      {materialText}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                /* No material uploaded yet: choose upload or paste */
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  <div style={{ display: 'flex', gap: '0.4rem' }}>
+                    <button
+                      type="button"
+                      onClick={() => setMaterialInputMode('file')}
+                      style={{
+                        flex: 1,
+                        padding: '0.35rem',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        borderRadius: '4px',
+                        border: materialInputMode === 'file' ? '1px solid #2563eb' : '1px solid #cbd5e1',
+                        background: materialInputMode === 'file' ? '#eff6ff' : '#ffffff',
+                        color: materialInputMode === 'file' ? '#1d4ed8' : '#64748b',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      📁 Upload File
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => setMaterialInputMode('text')}
+                      style={{
+                        flex: 1,
+                        padding: '0.35rem',
+                        fontSize: '0.75rem',
+                        fontWeight: 600,
+                        borderRadius: '4px',
+                        border: materialInputMode === 'text' ? '1px solid #2563eb' : '1px solid #cbd5e1',
+                        background: materialInputMode === 'text' ? '#eff6ff' : '#ffffff',
+                        color: materialInputMode === 'text' ? '#1d4ed8' : '#64748b',
+                        cursor: 'pointer',
+                      }}
+                    >
+                      ✍️ Paste Notes
+                    </button>
+                  </div>
+
+                  {materialInputMode === 'file' ? (
+                    <div>
+                      <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept=".pdf,.docx,.txt,.md,.csv,.json"
+                        onChange={handleFileUpload}
+                        disabled={isUploadingMaterial}
+                        style={{ display: 'none' }}
+                        id="reference-material-file-input"
+                      />
+                      <label
+                        htmlFor="reference-material-file-input"
+                        style={{
+                          display: 'flex',
+                          alignItems: 'center',
+                          justifyContent: 'center',
+                          gap: '0.4rem',
+                          padding: '0.65rem',
+                          backgroundColor: '#ffffff',
+                          border: '1px dashed #94a3b8',
+                          borderRadius: '6px',
+                          cursor: isUploadingMaterial ? 'not-allowed' : 'pointer',
+                          fontSize: '0.8rem',
+                          fontWeight: 500,
+                          color: '#475569',
+                          textAlign: 'center',
+                        }}
+                      >
+                        {isUploadingMaterial ? (
+                          <span>⏳ Extracting text & indexing...</span>
+                        ) : (
+                          <>
+                            <span>📤</span> Choose PDF, DOCX, TXT, or MD
+                          </>
+                        )}
+                      </label>
+                    </div>
+                  ) : (
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '0.4rem' }}>
+                      <input
+                        type="text"
+                        placeholder="Material Title (e.g. Chapter 4 Key Points)"
+                        value={manualMaterialName}
+                        onChange={(e) => setManualMaterialName(e.target.value)}
+                        style={{
+                          padding: '0.35rem 0.5rem',
+                          borderRadius: '4px',
+                          border: '1px solid #cbd5e1',
+                          fontSize: '0.78rem',
+                        }}
+                      />
+                      <textarea
+                        rows={3}
+                        placeholder="Paste lecture notes, answer keys, or key terms here..."
+                        value={manualMaterialText}
+                        onChange={(e) => setManualMaterialText(e.target.value)}
+                        style={{
+                          padding: '0.35rem 0.5rem',
+                          borderRadius: '4px',
+                          border: '1px solid #cbd5e1',
+                          fontSize: '0.78rem',
+                          fontFamily: 'inherit',
+                          resize: 'vertical',
+                        }}
+                      />
+                      <button
+                        type="button"
+                        onClick={handleSaveManualMaterial}
+                        disabled={isUploadingMaterial || !manualMaterialText.trim()}
+                        style={{
+                          padding: '0.35rem 0.65rem',
+                          backgroundColor: '#059669',
+                          color: '#ffffff',
+                          border: 'none',
+                          borderRadius: '4px',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          alignSelf: 'flex-end',
+                        }}
+                      >
+                        {isUploadingMaterial ? 'Saving...' : 'Save Notes'}
+                      </button>
+                    </div>
+                  )}
+                </div>
+              )}
+
+              {materialFeedback && (
+                <div style={{
+                  padding: '0.35rem 0.5rem',
+                  borderRadius: '4px',
+                  fontSize: '0.75rem',
+                  fontWeight: 500,
+                  backgroundColor: materialFeedback.type === 'success' ? '#f0fdf4' : '#fef2f2',
+                  color: materialFeedback.type === 'success' ? '#15803d' : '#dc2626',
+                  border: materialFeedback.type === 'success' ? '1px solid #bbf7d0' : '1px solid #fecaca',
+                }}>
+                  {materialFeedback.text}
+                </div>
+              )}
             </div>
 
             {topicMessage && (

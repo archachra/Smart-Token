@@ -30,16 +30,17 @@ const EVALUATION_SYSTEM_PROMPT = `You are a classroom evaluator assessing studen
 
 Inputs:
 - Topic: Discussion topic or subject.
-- Extra Info: Specific question or context from the teacher, if present.
+- Extra Info: Specific question or guiding prompt from the teacher, if present.
+- Reference Material / Answer Key: Reference notes, document, or content uploaded by the teacher to check answers against (if provided).
 - Student Transcript: Student's spoken response from speech-to-text.
 
 Rules:
-1. Evaluate against the provided Topic and Extra Info. Topic determines the relevant academic domain.
+1. Evaluate against the provided Topic, Extra Info, and Reference Material. If Reference Material is provided, treat it as the authoritative ground truth for checking factual accuracy, key terms, and correctness.
 2. Speech Tolerance: Tolerate speech-to-text quirks, accents, repetitions, and filler words ("um", "uh", "like"). Judge intended meaning rather than rigid phrasing. If wording appears absurd because of a likely speech-to-text error, use the surrounding context to infer the likely intended meaning, but never invent missing content.
 3. Token Guide:
-   - +1: Good, accurate, or relevant answer, including concise answers such as correctly naming an item.
-   - +2: Strong, detailed answer with explanation or multiple correct points.
-   - +3: Exceptional, deep, or unusually insightful response, usually to a specific and sufficiently complex question.
+   - +1: Good, accurate, or relevant answer aligning with the topic and reference material.
+   - +2: Strong, detailed answer with explanation or multiple correct points from reference material.
+   - +3: Exceptional, deep, or unusually insightful response.
    - 0: Blank, off-topic, incorrect, ambiguous, or no meaningful contribution.
    - -1: Clearly disruptive, deliberately irrelevant, or inappropriate response. Do not deduct merely because of possible speech-to-text errors.
 
@@ -51,7 +52,7 @@ Return ONLY a JSON object:
   "suggested_token_change": integer
 }`
 
-export async function evaluateWithGroq({ topic, extraInfo, transcript }, fetchImpl = fetch) {
+export async function evaluateWithGroq({ topic, extraInfo, referenceMaterial, transcript }, fetchImpl = fetch) {
   const apiKey = process.env.GROQ_API_KEY
   if (!apiKey) {
     throw new Error('GROQ_API_KEY is not configured')
@@ -76,6 +77,7 @@ export async function evaluateWithGroq({ topic, extraInfo, transcript }, fetchIm
               content: JSON.stringify({
                 topic,
                 extra_info: extraInfo || null,
+                reference_material: referenceMaterial || null,
                 student_transcript: transcript,
               }),
             },
@@ -139,7 +141,7 @@ export const evaluateWithGemini = evaluateWithGroq
 
 export async function processRecordingEvaluation(recordingId) {
   const recording = await pool.query(
-    `SELECT topic, extra_info AS "extraInfo", transcript, transcription_status AS "transcriptionStatus"
+    `SELECT topic, extra_info AS "extraInfo", reference_material AS "referenceMaterial", transcript, transcription_status AS "transcriptionStatus"
      FROM recording_sessions
      WHERE id = $1`,
     [recordingId]

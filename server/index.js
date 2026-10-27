@@ -11,6 +11,8 @@ import multer from 'multer'
 import { processRecordingTranscription } from './services/transcription.js'
 import { processRecordingEvaluation, finalizeRecordingEvaluation } from './services/evaluation.js'
 import { processSubmissionEvaluation, finalizeAssignmentSubmission } from './services/assignmentEvaluation.js'
+import { extractTextFromFile } from './services/documentExtractor.js'
+import { parseStudentCsv } from './utils/csvParser.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = path.dirname(__filename)
@@ -18,7 +20,8 @@ const __dirname = path.dirname(__filename)
 const recordingsUploadsDir = path.join(__dirname, 'uploads', 'recordings')
 const assignmentsUploadsDir = path.join(__dirname, 'uploads', 'assignments')
 const submissionsUploadsDir = path.join(__dirname, 'uploads', 'submissions')
-for (const dir of [recordingsUploadsDir, assignmentsUploadsDir, submissionsUploadsDir]) {
+const materialsUploadsDir = path.join(__dirname, 'uploads', 'materials')
+for (const dir of [recordingsUploadsDir, assignmentsUploadsDir, submissionsUploadsDir, materialsUploadsDir]) {
   if (!fs.existsSync(dir)) {
     fs.mkdirSync(dir, { recursive: true })
   }
@@ -34,6 +37,19 @@ const assignmentStorage = multer.diskStorage({
 })
 const assignmentUpload = multer({
   storage: assignmentStorage,
+  limits: { fileSize: 25 * 1024 * 1024 }
+})
+
+const materialStorage = multer.diskStorage({
+  destination: (req, file, cb) => cb(null, materialsUploadsDir),
+  filename: (req, file, cb) => {
+    const ext = path.extname(file.originalname) || ''
+    const safeName = `${Date.now()}-${Math.round(Math.random() * 1e9)}${ext}`
+    cb(null, safeName)
+  }
+})
+const materialUpload = multer({
+  storage: materialStorage,
   limits: { fileSize: 25 * 1024 * 1024 }
 })
 
@@ -92,6 +108,7 @@ app.post('/api/auth/login', async (req, res) => {
     // Development fallback passwords so authentication is resilient
     if (!match && process.env.NODE_ENV !== 'production') {
       const devPasswords = [
+        'Admin@3Q13',
         'Student@3Q13',
         'StudentPass123!',
         'FacultyPass123!',
@@ -780,7 +797,7 @@ app.delete('/api/sections/:sectionId/participation/raised/:requestId', async (re
   }
 })
 
-// GET /api/sections/:sectionId/participation/topic - Fetch current discussion topic and extra info
+// GET /api/sections/:sectionId/participation/topic - Fetch current discussion topic, extra info, and reference material
 app.get('/api/sections/:sectionId/participation/topic', async (req, res) => {
   const { sectionId } = req.params
   if (!sectionId || !UUID_REGEX.test(sectionId)) {
@@ -789,7 +806,9 @@ app.get('/api/sections/:sectionId/participation/topic', async (req, res) => {
 
   try {
     const secResult = await pool.query(
-      `SELECT active_topic AS "topic", active_extra_info AS "extraInfo" FROM sections WHERE id = $1`,
+      `SELECT active_topic AS "topic", active_extra_info AS "extraInfo",
+              active_material_name AS "materialName", active_material_text AS "materialText"
+       FROM sections WHERE id = $1`,
       [sectionId]
     )
 
@@ -797,9 +816,13 @@ app.get('/api/sections/:sectionId/participation/topic', async (req, res) => {
       return res.status(404).json({ error: 'Section not found' })
     }
 
+    const row = secResult.rows[0]
     return res.status(200).json({
-      topic: secResult.rows[0].topic || '',
-      extraInfo: secResult.rows[0].extraInfo || '',
+      topic: row.topic || '',
+      extraInfo: row.extraInfo || '',
+      materialName: row.materialName || null,
+      materialText: row.materialText || null,
+      hasMaterial: !!(row.materialText && row.materialText.trim()),
     })
   } catch (err) {
     console.error('Error fetching section active topic:', err)
@@ -825,7 +848,8 @@ app.put('/api/sections/:sectionId/participation/topic', async (req, res) => {
       `UPDATE sections
        SET active_topic = $1, active_extra_info = $2, updated_at = NOW()
        WHERE id = $3
-       RETURNING id, active_topic AS "topic", active_extra_info AS "extraInfo"`,
+       RETURNING id, active_topic AS "topic", active_extra_info AS "extraInfo",
+                 active_material_name AS "materialName", active_material_text AS "materialText"`,
       [topic ? topic.trim() : null, extraInfo ? extraInfo.trim() : null, sectionId]
     )
 
@@ -833,13 +857,113 @@ app.put('/api/sections/:sectionId/participation/topic', async (req, res) => {
       return res.status(404).json({ error: 'Section not found' })
     }
 
+    const row = updateResult.rows[0]
     return res.status(200).json({
-      topic: updateResult.rows[0].topic || '',
-      extraInfo: updateResult.rows[0].extraInfo || '',
+      topic: row.topic || '',
+      extraInfo: row.extraInfo || '',
+      materialName: row.materialName || null,
+      materialText: row.materialText || null,
+      hasMaterial: !!(row.materialText && row.materialText.trim()),
     })
   } catch (err) {
     console.error('Error updating section active topic:', err)
     return res.status(500).json({ error: 'Internal server error while updating topic' })
+  }
+})
+
+// POST /api/sections/:sectionId/participation/material - Upload reference material (file or text) for AI evaluation
+app.post('/api/sections/:sectionId/participation/material', materialUpload.single('file'), async (req, res) => {
+  const { sectionId } = req.params
+  if (!sectionId || !UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid or missing sectionId UUID' })
+  }
+  if (!['FACULTY', 'ADMIN'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Forbidden: faculty or admin role required' })
+  }
+
+  try {
+    let materialName = ''
+    let materialPath = null
+    let materialText = ''
+
+    if (req.file) {
+      materialName = req.file.originalname || 'Uploaded Document'
+      materialPath = req.file.path
+      materialText = await extractTextFromFile(req.file.path)
+      if (!materialText || !materialText.trim()) {
+        return res.status(400).json({
+          error: 'Could not extract text from the uploaded file. Please ensure it is a valid PDF, DOCX, TXT, MD, or CSV file.'
+        })
+      }
+    } else if (req.body?.text) {
+      materialText = String(req.body.text).trim()
+      materialName = String(req.body.materialName || 'Reference Material').trim()
+      if (!materialText) {
+        return res.status(400).json({ error: 'Reference text cannot be empty' })
+      }
+    } else {
+      return res.status(400).json({ error: 'No file or reference text provided' })
+    }
+
+    // Limit text size to 100k chars for optimal AI evaluation performance
+    if (materialText.length > 100000) {
+      materialText = materialText.slice(0, 100000)
+    }
+
+    const updateResult = await pool.query(
+      `UPDATE sections
+       SET active_material_name = $1, active_material_path = $2, active_material_text = $3, updated_at = NOW()
+       WHERE id = $4
+       RETURNING id, active_material_name AS "materialName", active_material_text AS "materialText"`,
+      [materialName, materialPath, materialText, sectionId]
+    )
+
+    if (updateResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Section not found' })
+    }
+
+    const words = materialText.trim().split(/\s+/).filter(Boolean).length
+    return res.status(200).json({
+      success: true,
+      materialName,
+      materialText,
+      charCount: materialText.length,
+      wordCount: words,
+      preview: materialText.slice(0, 500)
+    })
+  } catch (err) {
+    console.error('Error saving reference material:', err)
+    return res.status(500).json({ error: 'Internal server error while saving reference material' })
+  }
+})
+
+// DELETE /api/sections/:sectionId/participation/material - Clear reference material
+app.delete('/api/sections/:sectionId/participation/material', async (req, res) => {
+  const { sectionId } = req.params
+  if (!sectionId || !UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid or missing sectionId UUID' })
+  }
+  if (!['FACULTY', 'ADMIN'].includes(req.user.role)) {
+    return res.status(403).json({ error: 'Forbidden: faculty or admin role required' })
+  }
+
+  try {
+    const updateResult = await pool.query(
+      `UPDATE sections
+       SET active_material_name = NULL, active_material_path = NULL, active_material_text = NULL, updated_at = NOW()
+       WHERE id = $1
+       RETURNING id`,
+      [sectionId]
+    )
+
+    if (updateResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Section not found' })
+    }
+
+    return res.status(200).json({ success: true, message: 'Reference material cleared successfully' })
+  } catch (err) {
+    console.error('Error clearing reference material:', err)
+    return res.status(500).json({ error: 'Internal server error while clearing reference material' })
   }
 })
 
@@ -853,9 +977,9 @@ app.post('/api/sections/:sectionId/participation/recordings', async (req, res) =
   }
 
   try {
-    // 1. Fetch section and active topic/extraInfo
+    // 1. Fetch section and active topic/extraInfo/material
     const secResult = await pool.query(
-      `SELECT id, active_topic AS "topic", active_extra_info AS "extraInfo" FROM sections WHERE id = $1`,
+      `SELECT id, active_topic AS "topic", active_extra_info AS "extraInfo", active_material_text AS "materialText" FROM sections WHERE id = $1`,
       [sectionId]
     )
     if (secResult.rowCount === 0) {
@@ -902,14 +1026,15 @@ app.post('/api/sections/:sectionId/participation/recordings', async (req, res) =
       return res.status(403).json({ error: 'Forbidden' })
     }
 
-    // 3. Resolve topic and extraInfo
+    // 3. Resolve topic and extraInfo and reference material
     const finalTopic = (reqTopic && reqTopic.trim()) || sectionData.topic || 'Class Discussion'
     const finalExtraInfo = (reqExtraInfo && reqExtraInfo.trim()) || sectionData.extraInfo || null
+    const finalReferenceMaterial = sectionData.materialText || null
 
     // 4. Create RECORDING session
     const insertResult = await pool.query(
-      `INSERT INTO recording_sessions (section_id, student_id, raised_hand_id, status, recording_source, topic, extra_info, started_at)
-       VALUES ($1, $2, NULL, 'RECORDING', $3, $4, $5, NOW())
+      `INSERT INTO recording_sessions (section_id, student_id, raised_hand_id, status, recording_source, topic, extra_info, reference_material, started_at)
+       VALUES ($1, $2, NULL, 'RECORDING', $3, $4, $5, $6, NOW())
        RETURNING 
         id, 
         section_id AS "sectionId", 
@@ -919,6 +1044,7 @@ app.post('/api/sections/:sectionId/participation/recordings', async (req, res) =
         recording_source AS "recordingSource", 
         topic,
         extra_info AS "extraInfo",
+        reference_material AS "referenceMaterial",
         audio_url AS "audioUrl",
         transcript,
         transcription_status AS "transcriptionStatus",
@@ -927,7 +1053,7 @@ app.post('/api/sections/:sectionId/participation/recordings', async (req, res) =
         created_at AS "createdAt", 
         started_at AS "startedAt", 
         ended_at AS "endedAt"`,
-      [sectionId, targetStudentId, recordingSource, finalTopic, finalExtraInfo]
+      [sectionId, targetStudentId, recordingSource, finalTopic, finalExtraInfo, finalReferenceMaterial]
     )
 
     return res.status(201).json({
@@ -988,10 +1114,13 @@ app.post('/api/sections/:sectionId/participation/raised/:requestId/approve', asy
     )
 
     if (sessionCheck.rowCount === 0) {
-      // Create APPROVED recording session with topic and extra_info
+      const secMat = await client.query(`SELECT active_material_text AS "materialText" FROM sections WHERE id = $1`, [sectionId])
+      const referenceMaterial = secMat.rows[0]?.materialText || null
+
+      // Create APPROVED recording session with topic, extra_info, and reference_material
       const insertResult = await client.query(
-        `INSERT INTO recording_sessions (section_id, student_id, raised_hand_id, status, recording_source, topic, extra_info)
-         VALUES ($1, $2, $3, 'APPROVED', 'STUDENT_DEVICE', $4, $5)
+        `INSERT INTO recording_sessions (section_id, student_id, raised_hand_id, status, recording_source, topic, extra_info, reference_material)
+         VALUES ($1, $2, $3, 'APPROVED', 'STUDENT_DEVICE', $4, $5, $6)
          RETURNING 
           id, 
           section_id AS "sectionId", 
@@ -1001,6 +1130,7 @@ app.post('/api/sections/:sectionId/participation/raised/:requestId/approve', asy
           recording_source AS "recordingSource", 
           topic,
           extra_info AS "extraInfo",
+          reference_material AS "referenceMaterial",
           audio_url AS "audioUrl",
           transcript,
           transcription_status AS "transcriptionStatus",
@@ -1009,7 +1139,7 @@ app.post('/api/sections/:sectionId/participation/raised/:requestId/approve', asy
           created_at AS "createdAt", 
           started_at AS "startedAt", 
           ended_at AS "endedAt"`,
-        [sectionId, studentId, requestId, topic.trim(), extraInfo ? extraInfo.trim() : null]
+        [sectionId, studentId, requestId, topic.trim(), extraInfo ? extraInfo.trim() : null, referenceMaterial]
       )
 
       // Resolve the raised hand so it no longer appears in active queue
@@ -1408,7 +1538,7 @@ app.get('/api/sections/:sectionId/participation/recordings/:recordingId/evaluati
   try {
     const result = await pool.query(
       `SELECT rs.id, rs.student_id AS "studentId", s.user_id AS "studentUserId",
-              rs.topic, rs.extra_info AS "extraInfo", rs.transcript,
+              rs.topic, rs.extra_info AS "extraInfo", rs.reference_material AS "referenceMaterial", rs.transcript,
               rs.transcription_status AS "transcriptionStatus",
               re.status, re.relevant, re.correct, re.reason,
               re.suggested_token_change AS "suggestedTokenChange",
@@ -1875,6 +2005,416 @@ app.get('/api/sections/:sectionId/assignments/:assignmentId/my-submission', asyn
   } catch (err) {
     console.error('Error fetching my submission:', err)
     return res.status(500).json({ error: 'Internal server error while fetching submission' })
+  }
+})
+
+// ==========================================
+// ADMIN PORTAL ROUTES
+// ==========================================
+
+// GET /api/admin/overview - System overview with classes, student counts, and faculty
+app.get('/api/admin/overview', requireRole('ADMIN'), async (req, res) => {
+  try {
+    const sectionsQuery = await pool.query(`
+      SELECT 
+        s.id,
+        s.section_name AS "sectionName",
+        s.term,
+        s.created_at AS "createdAt",
+        c.id AS "courseId",
+        c.code AS "courseCode",
+        c.title AS "courseTitle",
+        c.description AS "courseDescription",
+        COUNT(DISTINCT e.student_id)::int AS "studentCount",
+        COALESCE(
+          json_agg(
+            DISTINCT jsonb_build_object('id', u.id, 'name', u.name, 'email', u.email)
+          ) FILTER (WHERE u.id IS NOT NULL),
+          '[]'::json
+        ) AS faculty
+      FROM sections s
+      JOIN courses c ON c.id = s.course_id
+      LEFT JOIN enrollments e ON e.section_id = s.id
+      LEFT JOIN section_faculty sf ON sf.section_id = s.id
+      LEFT JOIN users u ON u.id = sf.faculty_id
+      GROUP BY s.id, c.id
+      ORDER BY s.created_at DESC
+    `)
+
+    const totalsQuery = await pool.query(`
+      SELECT
+        (SELECT COUNT(*) FROM sections)::int AS "totalSections",
+        (SELECT COUNT(*) FROM students)::int AS "totalStudents",
+        (SELECT COUNT(*) FROM users WHERE role = 'FACULTY')::int AS "totalFaculty"
+    `)
+
+    return res.status(200).json({
+      sections: sectionsQuery.rows,
+      totals: totalsQuery.rows[0] || { totalSections: 0, totalStudents: 0, totalFaculty: 0 }
+    })
+  } catch (err) {
+    console.error('Admin overview error:', err)
+    return res.status(500).json({ error: 'Internal server error while fetching admin overview' })
+  }
+})
+
+// GET /api/admin/faculty - All registered faculty users
+app.get('/api/admin/faculty', requireRole('ADMIN'), async (req, res) => {
+  try {
+    const result = await pool.query(`
+      SELECT u.id, u.name, u.email, u.created_at AS "createdAt",
+             COALESCE(
+               json_agg(
+                 DISTINCT jsonb_build_object('sectionId', s.id, 'sectionName', s.section_name)
+               ) FILTER (WHERE s.id IS NOT NULL),
+               '[]'::json
+             ) AS sections
+      FROM users u
+      LEFT JOIN section_faculty sf ON sf.faculty_id = u.id
+      LEFT JOIN sections s ON s.id = sf.section_id
+      WHERE u.role = 'FACULTY'
+      GROUP BY u.id
+      ORDER BY u.name ASC
+    `)
+    return res.status(200).json({ faculty: result.rows })
+  } catch (err) {
+    console.error('Error fetching faculty list for admin:', err)
+    return res.status(500).json({ error: 'Internal server error while fetching faculty' })
+  }
+})
+
+// POST /api/admin/sections - Create a new class / section
+app.post('/api/admin/sections', requireRole('ADMIN'), async (req, res) => {
+  const { sectionName, courseTitle, courseCode, term, description } = req.body || {}
+  if (!sectionName || !sectionName.trim()) {
+    return res.status(400).json({ error: 'Section/Class name is required (e.g. 3Q14)' })
+  }
+
+  const sName = sectionName.trim()
+  const cTitle = (courseTitle && courseTitle.trim()) || `Course for ${sName}`
+  const cCode = (courseCode && courseCode.trim().toUpperCase()) || `${sName}-CRS`
+  const sTerm = (term && term.trim()) || 'Fall 2026'
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    let courseResult = await client.query(`SELECT id FROM courses WHERE code = $1`, [cCode])
+    let courseId
+    if (courseResult.rowCount > 0) {
+      courseId = courseResult.rows[0].id
+    } else {
+      const newCourse = await client.query(
+        `INSERT INTO courses (code, title, description) VALUES ($1, $2, $3) RETURNING id`,
+        [cCode, cTitle, description || `Course ${cCode} - ${cTitle}`]
+      )
+      courseId = newCourse.rows[0].id
+    }
+
+    const existingSection = await client.query(
+      `SELECT id FROM sections WHERE course_id = $1 AND section_name = $2 AND term = $3`,
+      [courseId, sName, sTerm]
+    )
+    if (existingSection.rowCount > 0) {
+      await client.query('ROLLBACK')
+      return res.status(409).json({ error: `Class section ${sName} already exists for ${sTerm}` })
+    }
+
+    const newSection = await client.query(
+      `INSERT INTO sections (course_id, section_name, term)
+       VALUES ($1, $2, $3)
+       RETURNING id, section_name AS "sectionName", term, created_at AS "createdAt"`,
+      [courseId, sName, sTerm]
+    )
+
+    await client.query('COMMIT')
+    return res.status(201).json({
+      success: true,
+      section: {
+        ...newSection.rows[0],
+        courseId,
+        courseCode: cCode,
+        courseTitle: cTitle,
+        studentCount: 0,
+        faculty: []
+      }
+    })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('Error creating section:', err)
+    return res.status(500).json({ error: 'Failed to create class section: ' + (err.message || err) })
+  } finally {
+    client.release()
+  }
+})
+
+// POST /api/admin/faculty - Create a faculty / teacher login and optionally assign to class
+app.post('/api/admin/faculty', requireRole('ADMIN'), async (req, res) => {
+  const { name, email, password, sectionId } = req.body || {}
+  if (!name || !name.trim() || !email || !email.trim()) {
+    return res.status(400).json({ error: 'Teacher name and email are required' })
+  }
+  const cleanEmail = email.trim().toLowerCase()
+  const cleanName = name.trim()
+  const cleanPass = (password && password.trim()) || `Faculty@${cleanName.split(' ')[0] || '123'}`
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    let userId
+    const userCheck = await client.query(`SELECT id FROM users WHERE email = $1`, [cleanEmail])
+    const passHash = await bcrypt.hash(cleanPass, 10)
+    if (userCheck.rowCount > 0) {
+      userId = userCheck.rows[0].id
+      await client.query(`UPDATE users SET password_hash = $1, role = 'FACULTY', name = $2 WHERE id = $3`, [passHash, cleanName, userId])
+    } else {
+      const newUser = await client.query(
+        `INSERT INTO users (name, email, password_hash, role)
+         VALUES ($1, $2, $3, 'FACULTY')
+         RETURNING id`,
+        [cleanName, cleanEmail, passHash]
+      )
+      userId = newUser.rows[0].id
+    }
+
+    if (sectionId && UUID_REGEX.test(sectionId)) {
+      await client.query(
+        `INSERT INTO section_faculty (faculty_id, section_id)
+         VALUES ($1, $2)
+         ON CONFLICT (faculty_id, section_id) DO NOTHING`,
+        [userId, sectionId]
+      )
+    }
+
+    await client.query('COMMIT')
+    return res.status(201).json({
+      success: true,
+      faculty: {
+        id: userId,
+        name: cleanName,
+        email: cleanEmail,
+        password: cleanPass,
+        assignedSectionId: sectionId || null
+      }
+    })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('Error creating faculty:', err)
+    return res.status(500).json({ error: 'Failed to create faculty: ' + (err.message || err) })
+  } finally {
+    client.release()
+  }
+})
+
+// POST /api/admin/sections/:sectionId/faculty - Assign existing faculty to a section
+app.post('/api/admin/sections/:sectionId/faculty', requireRole('ADMIN'), async (req, res) => {
+  const { sectionId } = req.params
+  const { facultyId } = req.body || {}
+  if (!sectionId || !UUID_REGEX.test(sectionId) || !facultyId || !UUID_REGEX.test(facultyId)) {
+    return res.status(400).json({ error: 'Valid sectionId and facultyId UUIDs are required' })
+  }
+  try {
+    await pool.query(
+      `INSERT INTO section_faculty (section_id, faculty_id)
+       VALUES ($1, $2)
+       ON CONFLICT (faculty_id, section_id) DO NOTHING`,
+      [sectionId, facultyId]
+    )
+    return res.status(200).json({ success: true, message: 'Faculty assigned to class successfully' })
+  } catch (err) {
+    console.error('Error assigning faculty to section:', err)
+    return res.status(500).json({ error: 'Failed to assign faculty: ' + (err.message || err) })
+  }
+})
+
+// POST /api/admin/sections/:sectionId/students-csv - Upload student CSV and generate logins
+app.post('/api/admin/sections/:sectionId/students-csv', requireRole('ADMIN'), materialUpload.single('file'), async (req, res) => {
+  const { sectionId } = req.params
+  if (!sectionId || !UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid or missing sectionId UUID' })
+  }
+
+  try {
+    let csvContent = ''
+    if (req.file) {
+      csvContent = fs.readFileSync(req.file.path, 'utf8')
+    } else if (req.body?.csvText) {
+      csvContent = String(req.body.csvText)
+    } else {
+      return res.status(400).json({ error: 'No CSV file or csvText provided' })
+    }
+
+    const secResult = await pool.query(`SELECT id, section_name AS "sectionName" FROM sections WHERE id = $1`, [sectionId])
+    if (secResult.rowCount === 0) {
+      return res.status(404).json({ error: 'Section not found' })
+    }
+    const sectionName = secResult.rows[0].sectionName
+
+    const parsedStudents = parseStudentCsv(csvContent)
+    if (parsedStudents.length === 0) {
+      return res.status(400).json({ error: 'Could not find any valid student rows (Name, RollNumber) in the CSV' })
+    }
+
+    const client = await pool.connect()
+    const createdList = []
+
+    try {
+      await client.query('BEGIN')
+
+      for (const item of parsedStudents) {
+        const rawName = item.name.trim()
+        const rawRoll = item.rollNumber.trim()
+        if (!rawName || !rawRoll) continue
+
+        const firstName = rawName.split(/\s+/)[0].replace(/[^a-zA-Z]/g, '') || 'Student'
+        const cleanRoll = rawRoll.replace(/[^a-zA-Z0-9_-]/g, '')
+        const email = `${firstName.toLowerCase()}.${cleanRoll.toLowerCase()}@smarttoken.edu`
+        const password = `${firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase()}@${sectionName}`
+        const passwordHash = await bcrypt.hash(password, 10)
+
+        // 1. Insert or update users table
+        let userId
+        const userCheck = await client.query(`SELECT id FROM users WHERE email = $1`, [email])
+        if (userCheck.rowCount > 0) {
+          userId = userCheck.rows[0].id
+          await client.query(
+            `UPDATE users SET password_hash = $1, name = $2, role = 'STUDENT' WHERE id = $3`,
+            [passwordHash, rawName, userId]
+          )
+        } else {
+          const newUser = await client.query(
+            `INSERT INTO users (name, email, password_hash, role) VALUES ($1, $2, $3, 'STUDENT') RETURNING id`,
+            [rawName, email, passwordHash]
+          )
+          userId = newUser.rows[0].id
+        }
+
+        // 2. Insert or update students table
+        let studentId
+        const studentCheck = await client.query(
+          `SELECT id FROM students WHERE student_id_number = $1 OR user_id = $2 OR email = $3`,
+          [cleanRoll, userId, email]
+        )
+        if (studentCheck.rowCount > 0) {
+          studentId = studentCheck.rows[0].id
+          await client.query(
+            `UPDATE students SET name = $1, student_id_number = $2, email = $3, user_id = $4 WHERE id = $5`,
+            [rawName, cleanRoll, email, userId, studentId]
+          )
+        } else {
+          const newStudent = await client.query(
+            `INSERT INTO students (user_id, name, student_id_number, email) VALUES ($1, $2, $3, $4) RETURNING id`,
+            [userId, rawName, cleanRoll, email]
+          )
+          studentId = newStudent.rows[0].id
+        }
+
+        // 3. Enroll into section
+        await client.query(
+          `INSERT INTO enrollments (student_id, section_id, attendance_status)
+           VALUES ($1, $2, 'PRESENT')
+           ON CONFLICT (section_id, student_id) DO NOTHING`,
+          [studentId, sectionId]
+        )
+
+        // 4. Initialize balance
+        await client.query(
+          `INSERT INTO student_balances (student_id, section_id, balance)
+           VALUES ($1, $2, 0)
+           ON CONFLICT (student_id, section_id) DO NOTHING`,
+          [studentId, sectionId]
+        )
+
+        createdList.push({
+          rollNumber: cleanRoll,
+          name: rawName,
+          email,
+          password,
+          studentId,
+          userId
+        })
+      }
+
+      await client.query('COMMIT')
+
+      return res.status(200).json({
+        success: true,
+        message: `Successfully provisioned ${createdList.length} students for section ${sectionName}`,
+        count: createdList.length,
+        section: { id: sectionId, sectionName },
+        students: createdList
+      })
+    } catch (txErr) {
+      await client.query('ROLLBACK')
+      throw txErr
+    } finally {
+      client.release()
+    }
+  } catch (err) {
+    console.error('Error processing student CSV:', err)
+    return res.status(500).json({ error: 'Failed to process student CSV: ' + (err.message || err) })
+  }
+})
+
+// GET /api/admin/sections/:sectionId/students - View enrolled students in class
+app.get('/api/admin/sections/:sectionId/students', requireRole('ADMIN'), async (req, res) => {
+  const { sectionId } = req.params
+  if (!sectionId || !UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid sectionId UUID' })
+  }
+  try {
+    const result = await pool.query(`
+      SELECT 
+        s.id,
+        s.name,
+        s.student_id_number AS "studentIdNumber",
+        s.email,
+        u.email AS "userEmail",
+        COALESCE(sb.balance, 0) AS balance,
+        e.attendance_status AS "attendanceStatus",
+        e.enrolled_at AS "enrolledAt"
+      FROM enrollments e
+      JOIN students s ON s.id = e.student_id
+      LEFT JOIN users u ON u.id = s.user_id
+      LEFT JOIN student_balances sb ON sb.student_id = s.id AND sb.section_id = e.section_id
+      WHERE e.section_id = $1
+      ORDER BY s.student_id_number ASC
+    `, [sectionId])
+
+    return res.status(200).json({ students: result.rows })
+  } catch (err) {
+    console.error('Error fetching section students for admin:', err)
+    return res.status(500).json({ error: 'Internal server error while fetching student list' })
+  }
+})
+
+// DELETE /api/admin/sections/:sectionId - Delete class section and associated relations
+app.delete('/api/admin/sections/:sectionId', requireRole('ADMIN'), async (req, res) => {
+  const { sectionId } = req.params
+  if (!sectionId || !UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid sectionId UUID' })
+  }
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(`DELETE FROM student_balances WHERE section_id = $1`, [sectionId])
+    await client.query(`DELETE FROM enrollments WHERE section_id = $1`, [sectionId])
+    await client.query(`DELETE FROM section_faculty WHERE section_id = $1`, [sectionId])
+    await client.query(`DELETE FROM raised_hands WHERE section_id = $1`, [sectionId])
+    await client.query(`DELETE FROM recording_sessions WHERE section_id = $1`, [sectionId])
+    await client.query(`DELETE FROM events WHERE section_id = $1`, [sectionId])
+    await client.query(`DELETE FROM assignments WHERE section_id = $1`, [sectionId])
+    const delSec = await client.query(`DELETE FROM sections WHERE id = $1 RETURNING id, section_name AS "sectionName"`, [sectionId])
+    await client.query('COMMIT')
+    if (delSec.rowCount === 0) return res.status(404).json({ error: 'Section not found' })
+    return res.status(200).json({ success: true, message: `Class section ${delSec.rows[0].sectionName} deleted successfully` })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('Error deleting section:', err)
+    return res.status(500).json({ error: 'Failed to delete section: ' + (err.message || err) })
+  } finally {
+    client.release()
   }
 })
 

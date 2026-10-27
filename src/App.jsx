@@ -11,7 +11,7 @@ import HistoryPage from './pages/HistoryPage.jsx';
 import StudentHomePage from './pages/StudentHomePage.jsx';
 import LoginPage from './pages/LoginPage.jsx';
 import ProtectedRoute from './components/ProtectedRoute.jsx';
-import AdminPlaceholder from './pages/AdminPlaceholder.jsx';
+import AdminPage from './pages/AdminPage.jsx';
 import ErrorBoundary from './components/ErrorBoundary.jsx';
 
 export default function App() {
@@ -21,7 +21,7 @@ export default function App() {
         <Routes>
           <Route path="/login" element={<LoginPage />} />
           <Route path="/student/*" element={<ProtectedRoute><StudentHomePage /></ProtectedRoute>} />
-          <Route path="/admin" element={<ProtectedRoute><AdminPlaceholder /></ProtectedRoute>} />
+          <Route path="/admin" element={<ProtectedRoute><AdminPage /></ProtectedRoute>} />
           <Route path="/" element={<ProtectedRoute><Layout /></ProtectedRoute>}>
             <Route index element={<HomePage />} />
             <Route path="attendance" element={<AttendancePage />} />
