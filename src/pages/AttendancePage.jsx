@@ -238,7 +238,7 @@ export default function AttendancePage() {
       <div className="attendance-header">
         <div>
           <h2>Attendance</h2>
-          <p className="page-subtitle">Computer Science 101 • Section A</p>
+          <p className="page-subtitle">Computer Science 101 • 3Q13</p>
         </div>
 
         {/* Summary Card */}

@@ -1,5 +1,5 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
-import { DEMO_STUDENT_NAMES } from '../data/demoStudents'
+import { CLASS_3Q13_STUDENTS } from '../data/demoStudents'
 import { get } from '../utils/api.js'
 import {
   queueAction,
@@ -15,41 +15,21 @@ import {
 
 const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 
-const initialStudents = [
-  { rollNumber: 'CS101-001', name: 'Arnav Chachra', seat: 'Row 1 • Seat 3', tokens: 4, initials: 'AC', color: '#2563eb', isRecent: true },
-  { rollNumber: 'CS101-015', name: 'Shaurya', seat: 'Row 3 • Seat 1', tokens: 3, initials: 'S', color: '#0284c7', isRecent: false },
-  { rollNumber: 'CS101-014', name: 'Piyush', seat: 'Row 2 • Seat 2', tokens: 5, initials: 'P', color: '#059669', isRecent: false },
-  { rollNumber: 'CS101-007', name: 'Rhythm', seat: 'Row 4 • Seat 4', tokens: 2, initials: 'R', color: '#7c3aed', isRecent: false },
-  { rollNumber: 'CS101-006', name: 'Kunal', seat: 'Row 1 • Seat 5', tokens: 1, initials: 'K', color: '#d97706', isRecent: false },
-  { rollNumber: 'CS101-008', name: 'Aditya Gupta', seat: 'Row 2 • Seat 4', tokens: 2, initials: 'AG', color: '#db2777', isRecent: true },
-  { rollNumber: 'CS101-009', name: 'Arjan Singh Sawhney', seat: 'Row 3 • Seat 2', tokens: 5, initials: 'AS', color: '#65a30d', isRecent: true },
-  { rollNumber: 'CS101-010', name: 'Ashmeen Kaur', seat: 'Row 1 • Seat 2', tokens: 6, initials: 'AK', color: '#0891b2', isRecent: false },
-  { rollNumber: 'CS101-011', name: 'Charvi', seat: 'Row 4 • Seat 1', tokens: 3, initials: 'C', color: '#4f46e5', isRecent: false },
-  { rollNumber: 'CS101-012', name: 'Gagandeep Kaur', seat: 'Row 2 • Seat 3', tokens: 4, initials: 'GK', color: '#ca8a04', isRecent: false },
-  { rollNumber: 'CS101-013', name: 'Jaskaran Singh', seat: 'Row 3 • Seat 5', tokens: 1, initials: 'JS', color: '#9333ea', isRecent: false },
-  { rollNumber: 'CS101-016', name: 'Jasroop', seat: 'Row 1 • Seat 4', tokens: 3, initials: 'J', color: '#e11d48', isRecent: false },
-  { rollNumber: 'CS101-017', name: 'Kanishak', seat: 'Row 4 • Seat 2', tokens: 2, initials: 'K', color: '#2563eb', isRecent: false },
-  { rollNumber: 'CS101-018', name: 'Kashish Kannojiya', seat: 'Row 1 • Seat 1', tokens: 3, initials: 'KK', color: '#d97706', isRecent: true },
-  { rollNumber: 'CS101-019', name: 'Khushi', seat: 'Row 2 • Seat 5', tokens: 7, initials: 'K', color: '#059669', isRecent: true },
-]
+const COLOR_PALETTE = ['#2563eb', '#0284c7', '#059669', '#7c3aed', '#d97706', '#db2777', '#65a30d', '#0891b2', '#4f46e5']
 
-const presetMap = new Map(initialStudents.map((s) => [s.name.toLowerCase(), s]))
-
-const orderedStudents = DEMO_STUDENT_NAMES.map((name, index) => {
-  const preset = presetMap.get(name.toLowerCase())
-  const rollNumber = preset?.rollNumber || `CS101-${String(index + 1).padStart(3, '0')}`
-  const initials = preset?.initials || name.split(' ').map((part) => part[0]).join('').slice(0, 2)
+const orderedStudents = CLASS_3Q13_STUDENTS.map((student, index) => {
+  const initials = student.name.split(' ').map((part) => part[0]).join('').slice(0, 2)
 
   return {
     id: `demo-${index + 1}`,
-    rollNumber,
-    name,
-    seat: preset?.seat || `Row ${Math.floor(index / 5) + 1} • Seat ${(index % 5) + 1}`,
-    tokens: preset?.tokens || 0,
-    serverTokens: preset?.tokens || 0,
+    rollNumber: student.rollNumber,
+    name: student.name,
+    seat: `Row ${Math.floor(index / 5) + 1} • Seat ${(index % 5) + 1}`,
+    tokens: 0,
+    serverTokens: 0,
     initials,
-    color: preset?.color || '#64748b',
-    isRecent: Boolean(preset?.isRecent),
+    color: COLOR_PALETTE[index % COLOR_PALETTE.length],
+    isRecent: false,
   }
 })
 
@@ -347,7 +327,7 @@ export default function QuickTokenPage() {
       <div className="quick-token-header">
         <div>
           <h2>Quick Token</h2>
-          <p className="page-subtitle">Computer Science 101 • Section A</p>
+          <p className="page-subtitle">Computer Science 101 • 3Q13</p>
         </div>
 
         {/* Overall Total Tokens Summary Card */}

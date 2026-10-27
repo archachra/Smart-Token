@@ -48,7 +48,7 @@ export default function Header() {
         </div>
         <div className="brand-text-group">
           <h1 className="brand-title">SmartToken</h1>
-          <span className="brand-section-tag">CS 101 • Section A</span>
+          <span className="brand-section-tag">CS 101 • 3Q13</span>
         </div>
         <span className="portal-badge">Faculty Portal</span>
       </div>

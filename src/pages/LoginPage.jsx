@@ -73,14 +73,14 @@ export default function LoginPage() {
         
         <form onSubmit={handleSubmit} className="login-form">
           <div className="login-field">
-            <label htmlFor="email">Email</label>
+            <label htmlFor="email">Email or Roll Number</label>
             <input
               id="email"
-              type="email"
+              type="text"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              placeholder="faculty@example.com"
+              placeholder="name@smarttoken.edu or Roll Number"
             />
           </div>
           <div className="login-field">

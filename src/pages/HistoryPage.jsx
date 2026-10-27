@@ -203,7 +203,7 @@ export default function HistoryPage() {
       <div className="history-header">
         <div>
           <h2>History</h2>
-          <p className="page-subtitle">Computer Science 101 • Section A</p>
+          <p className="page-subtitle">Computer Science 101 • 3Q13</p>
         </div>
 
         <div className="event-count-badge">

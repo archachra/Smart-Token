@@ -1,46 +1,24 @@
 import { useState, useEffect, useRef } from 'react'
 import { Link } from 'react-router-dom'
 import { get, post, put, patch } from '../utils/api.js'
-import { DEMO_STUDENT_NAMES } from '../data/demoStudents'
+import { CLASS_3Q13_STUDENTS } from '../data/demoStudents'
 
 // Section ID (hard‑coded for demo)
 const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 
-const rosterStudents = [
-  { id: 1, rollNumber: 'CS101-001', name: 'Arnav Chachra', seat: 'Row 1 • Seat 3', initials: 'AC', color: '#2563eb' },
-  { id: 2, rollNumber: 'CS101-002', name: 'Shaurya', seat: 'Row 3 • Seat 1', initials: 'S', color: '#0284c7' },
-  { id: 3, rollNumber: 'CS101-003', name: 'Piyush', seat: 'Row 2 • Seat 2', initials: 'P', color: '#059669' },
-  { id: 4, rollNumber: 'CS101-004', name: 'Rhythm', seat: 'Row 4 • Seat 4', initials: 'R', color: '#7c3aed' },
-  { id: 5, rollNumber: 'CS101-005', name: 'Kunal', seat: 'Row 1 • Seat 5', initials: 'K', color: '#d97706' },
-  { id: 6, rollNumber: 'CS101-006', name: 'Aditya Gupta', seat: 'Row 2 • Seat 4', initials: 'AG', color: '#db2777' },
-  { id: 7, rollNumber: 'CS101-007', name: 'Arjan Singh Sawhney', seat: 'Row 3 • Seat 2', initials: 'AS', color: '#65a30d' },
-  { id: 8, rollNumber: 'CS101-008', name: 'Ashmeen Kaur', seat: 'Row 1 • Seat 2', initials: 'AK', color: '#0891b2' },
-  { id: 9, rollNumber: 'CS101-009', name: 'Charvi', seat: 'Row 4 • Seat 1', initials: 'C', color: '#4f46e5' },
-  { id: 10, rollNumber: 'CS101-010', name: 'Gagandeep Kaur', seat: 'Row 2 • Seat 3', initials: 'GK', color: '#ca8a04' },
-  { id: 11, rollNumber: 'CS101-011', name: 'Jaskaran Singh', seat: 'Row 3 • Seat 5', initials: 'JS', color: '#9333ea' },
-  { id: 12, rollNumber: 'CS101-012', name: 'Jasroop', seat: 'Row 1 • Seat 4', initials: 'J', color: '#e11d48' },
-  { id: 13, rollNumber: 'CS101-013', name: 'Kanishak', seat: 'Row 4 • Seat 2', initials: 'K', color: '#2563eb' },
-  { id: 14, rollNumber: 'CS101-014', name: 'Kashish Kannojiya', seat: 'Row 1 • Seat 1', initials: 'KK', color: '#d97706' },
-  { id: 15, rollNumber: 'CS101-015', name: 'Khushi', seat: 'Row 2 • Seat 5', initials: 'K', color: '#059669' },
-  { id: 16, rollNumber: 'CS101-016', name: 'Prabhleen', seat: 'Row 1 • Seat 3', initials: 'P', color: '#2563eb' },
-  { id: 17, rollNumber: 'CS101-017', name: 'Puneet Singh', seat: 'Row 3 • Seat 1', initials: 'PS', color: '#0284c7' },
-  { id: 18, rollNumber: 'CS101-018', name: 'Rakshat', seat: 'Row 2 • Seat 2', initials: 'R', color: '#059669' },
-  { id: 19, rollNumber: 'CS101-019', name: 'Rupinder Kaur', seat: 'Row 4 • Seat 4', initials: 'RK', color: '#7c3aed' },
-  { id: 20, rollNumber: 'CS101-020', name: 'Surya', seat: 'Row 1 • Seat 5', initials: 'S', color: '#d97706' },
-  { id: 21, rollNumber: 'CS101-021', name: 'Gourav', seat: 'Row 2 • Seat 4', initials: 'G', color: '#db2777' },
-  { id: 22, rollNumber: 'CS101-022', name: 'Coral', seat: 'Row 3 • Seat 2', initials: 'C', color: '#65a30d' },
-  { id: 23, rollNumber: 'CS101-023', name: 'Dhruv', seat: 'Row 1 • Seat 2', initials: 'D', color: '#0891b2' },
-  { id: 24, rollNumber: 'CS101-024', name: 'Dishita Sharma', seat: 'Row 4 • Seat 1', initials: 'DS', color: '#4f46e5' },
-  { id: 25, rollNumber: 'CS101-025', name: 'Harsith', seat: 'Row 2 • Seat 3', initials: 'H', color: '#ca8a04' },
-  { id: 26, rollNumber: 'CS101-026', name: 'Himanshi Gupta', seat: 'Row 3 • Seat 5', initials: 'HG', color: '#9333ea' },
-  { id: 27, rollNumber: 'CS101-027', name: 'Krrish Dhaneja', seat: 'Row 1 • Seat 4', initials: 'KD', color: '#e11d48' },
-  { id: 28, rollNumber: 'CS101-028', name: 'Nachiket Singla', seat: 'Row 4 • Seat 2', initials: 'NS', color: '#2563eb' },
-  { id: 29, rollNumber: 'CS101-029', name: 'Navdeep Jain', seat: 'Row 1 • Seat 1', initials: 'NJ', color: '#d97706' },
-  { id: 30, rollNumber: 'CS101-030', name: 'Parth', seat: 'Row 2 • Seat 5', initials: 'P', color: '#059669' },
-  { id: 31, rollNumber: 'CS101-031', name: 'Rahul', seat: 'Row 3 • Seat 3', initials: 'R', color: '#2563eb' },
-]
-
 const COLOR_PALETTE = ['#2563eb', '#0284c7', '#059669', '#7c3aed', '#d97706', '#db2777', '#65a30d', '#0891b2', '#4f46e5']
+
+const rosterStudents = CLASS_3Q13_STUDENTS.map((student, index) => {
+  const initials = student.name.split(' ').map((part) => part[0]).join('').slice(0, 2)
+  return {
+    id: index + 1,
+    rollNumber: student.rollNumber,
+    name: student.name,
+    seat: `Row ${Math.floor(index / 5) + 1} • Seat ${(index % 5) + 1}`,
+    initials,
+    color: COLOR_PALETTE[index % COLOR_PALETTE.length],
+  }
+})
 
 export default function ParticipationPage() {
   const [students, setStudents] = useState([])
@@ -361,7 +339,7 @@ export default function ParticipationPage() {
         <main className="participation-main">
           <div className="page-header">
             <h2>Participation</h2>
-            <p className="page-subtitle">Computer Science 101 • Section A</p>
+            <p className="page-subtitle">Computer Science 101 • 3Q13</p>
           </div>
 
           {actionFeedback && (
