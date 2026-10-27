@@ -1,5 +1,6 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import ThemeSwitcher from '../components/ThemeSwitcher.jsx';
 
 // Simple base64url decoder for JWT payload
 function decodeJwtPayload(token) {
@@ -58,38 +59,43 @@ export default function LoginPage() {
   };
 
   return (
-    <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: '#f1f5f9', padding: '1.5rem' }}>
-      <div style={{ background: '#fff', padding: '2rem', borderRadius: '12px', boxShadow: '0 4px 16px rgba(0,0,0,0.08)', width: '100%', maxWidth: '380px' }}>
-        <h2 style={{ marginBottom: '1.5rem', textAlign: 'center', color: '#0f172a' }}>SmartToken Login</h2>
-        {error && <div style={{ color: '#dc2626', backgroundColor: '#fef2f2', border: '1px solid #fecaca', padding: '0.6rem', borderRadius: '6px', marginBottom: '1rem', textAlign: 'center', fontSize: '0.85rem' }}>{error}</div>}
+    <div className="login-page">
+      <div className="login-top-bar">
+        <ThemeSwitcher />
+      </div>
+      <div className="login-card">
+        <div className="login-brand">
+          <div className="login-logo-circle">🪙</div>
+          <h2 className="login-title">SmartToken</h2>
+          <p className="login-subtitle">Attendance & Micro-Token Classroom Ledger</p>
+        </div>
+        {error && <div className="login-error">{error}</div>}
         
-        <form onSubmit={handleSubmit}>
-          <div style={{ marginBottom: '1rem' }}>
-            <label htmlFor="email" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600, fontSize: '0.875rem', color: '#334155' }}>Email</label>
+        <form onSubmit={handleSubmit} className="login-form">
+          <div className="login-field">
+            <label htmlFor="email">Email</label>
             <input
               id="email"
               type="email"
               value={email}
               onChange={(e) => setEmail(e.target.value)}
               required
-              placeholder="Enter your email"
-              style={{ width: '100%', padding: '0.6rem 0.75rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9rem', boxSizing: 'border-box' }}
+              placeholder="faculty@example.com"
             />
           </div>
-          <div style={{ marginBottom: '1.5rem' }}>
-            <label htmlFor="password" style={{ display: 'block', marginBottom: '0.35rem', fontWeight: 600, fontSize: '0.875rem', color: '#334155' }}>Password</label>
+          <div className="login-field">
+            <label htmlFor="password">Password</label>
             <input
               id="password"
               type="password"
               value={password}
               onChange={(e) => setPassword(e.target.value)}
               required
-              placeholder="Enter your password"
-              style={{ width: '100%', padding: '0.6rem 0.75rem', borderRadius: '6px', border: '1px solid #cbd5e1', fontSize: '0.9rem', boxSizing: 'border-box' }}
+              placeholder="••••••••"
             />
           </div>
-          <button type="submit" style={{ width: '100%', padding: '0.75rem', backgroundColor: '#0284c7', color: '#fff', border: 'none', borderRadius: '6px', cursor: 'pointer', fontWeight: 600, fontSize: '0.95rem' }}>
-            Login
+          <button type="submit" className="login-submit-btn">
+            Sign In to Classroom →
           </button>
         </form>
       </div>

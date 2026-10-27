@@ -2,6 +2,7 @@ import React, { useState, useEffect, useRef, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { get, post, patch, del, postFormData } from '../utils/api.js';
 import AudioPlayer from '../components/AudioPlayer.jsx';
+import ThemeSwitcher from '../components/ThemeSwitcher.jsx';
 
 const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7';
 
@@ -690,11 +691,12 @@ export default function StudentHomePage() {
   return (
     <div style={{ minHeight: '100vh', backgroundColor: '#f8fafc', padding: '2rem 1rem' }}>
       <div style={{ maxWidth: '800px', margin: '0 auto' }}>
-        <div className="student-card">
-          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem' }}>
+        <div className="student-portal-card">
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: '0.75rem', gap: '0.75rem', alignItems: 'center' }}>
+            <ThemeSwitcher />
             <button className="student-btn-cancel" onClick={handleLogout}>Logout</button>
           </div>
-      <h2 className="student-header">{student.name}</h2>
+      <h2 className="student-portal-header">{student.name}</h2>
       <p className="student-id">
         Roll / ID: {student.studentIdNumber || student.studentId || student.id}
       </p>

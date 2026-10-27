@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
 import { subscribeSyncState, syncNow, PROMPT_SYNC_MS } from '../utils/syncManager.js';
+import ThemeSwitcher from './ThemeSwitcher.jsx';
 
 export default function Header() {
   const [syncState, setSyncState] = useState({
@@ -42,12 +43,18 @@ export default function Header() {
   return (
     <header className="header">
       <div className="header-brand">
-        <span className="brand-logo">🪙</span>
-        <h1 className="brand-title">SmartToken</h1>
+        <div className="brand-logo-container">
+          <span className="brand-logo">🪙</span>
+        </div>
+        <div className="brand-text-group">
+          <h1 className="brand-title">SmartToken</h1>
+          <span className="brand-section-tag">CS 101 • Section A</span>
+        </div>
         <span className="portal-badge">Faculty Portal</span>
       </div>
 
       <div className="header-actions">
+        <ThemeSwitcher />
         {syncState.authExpired ? (
           <div className="status-indicator auth-expired" title="Authentication expired. Actions preserved locally in queue.">
             <span className="status-dot"></span>
