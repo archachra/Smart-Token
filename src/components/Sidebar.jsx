@@ -34,19 +34,33 @@ const navGroups = [
 export default function Sidebar() {
   const navigate = useNavigate();
   const [assignments, setAssignments] = useState([]);
-  const user = getCurrentUser();
+  const [profile, setProfile] = useState(() => getCurrentUser());
 
   useEffect(() => {
+    let isMounted = true;
+
     const loadAssignments = async () => {
       try {
         const data = await get(`/api/sections/${SECTION_ID}/assignments`);
-        setAssignments(data.assignments || []);
+        if (isMounted) setAssignments(data.assignments || []);
       } catch (e) {
         // fail silently for sidebar
       }
     };
 
+    const loadUserProfile = async () => {
+      try {
+        const data = await get('/api/auth/me');
+        if (isMounted && data?.user) {
+          setProfile(prev => ({ ...prev, ...data.user }));
+        }
+      } catch (e) {
+        // Fallback to token decoded data
+      }
+    };
+
     loadAssignments();
+    loadUserProfile();
 
     const handleAssignmentCreated = () => {
       loadAssignments();
@@ -54,26 +68,29 @@ export default function Sidebar() {
 
     window.addEventListener('assignment-created', handleAssignmentCreated);
     return () => {
+      isMounted = false;
       window.removeEventListener('assignment-created', handleAssignmentCreated);
     };
   }, []);
 
   const handleLogout = () => {
-    if (user?.userId) {
-      clearUserCache(user.userId);
+    if (profile?.userId || profile?.id) {
+      clearUserCache(profile.userId || profile.id);
     }
     localStorage.removeItem('smarttoken_token');
     navigate('/login');
   };
 
-  const displayName = user?.name || (user?.email ? user.email.split('@')[0] : 'Instructor');
-  const displayRole = user?.role === 'FACULTY' ? 'Lead Faculty' : (user?.role || 'Instructor');
-  const userInitials = displayName
-    .split(' ')
-    .map((p) => p[0])
-    .join('')
-    .slice(0, 2)
-    .toUpperCase();
+  const displayName = profile?.name || (profile?.email ? profile.email.split('@')[0] : 'Faculty');
+  const displayRole = profile?.role === 'FACULTY' ? 'Lead Faculty' : (profile?.role || 'Instructor');
+  const sectionLabel = profile?.sectionName || '3Q13';
+
+  // Compute clean initials, ignoring titles like Prof., Dr., Mr.
+  const cleanName = displayName.replace(/^(Prof\.?|Dr\.?|Mr\.?|Ms\.?|Mrs\.?)\s+/i, '').trim();
+  const parts = cleanName.split(/\s+/).filter(Boolean);
+  const userInitials = parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : (cleanName.slice(0, 2).toUpperCase() || 'FC');
 
   return (
     <aside className="sidebar">
@@ -130,8 +147,8 @@ export default function Sidebar() {
           {userInitials || 'FC'}
         </div>
         <div className="sidebar-user-info">
-          <span className="sidebar-user-name">{displayName}</span>
-          <span className="sidebar-user-role">{displayRole} • 3Q13</span>
+          <span className="sidebar-user-name" title={displayName}>{displayName}</span>
+          <span className="sidebar-user-role">{displayRole} • {sectionLabel}</span>
         </div>
         <button
           className="sidebar-logout-icon-btn"

@@ -88,7 +88,7 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     // Support login by email, student roll number, or legacy alias
     const userRes = await pool.query(
-      `SELECT u.id, u.email, u.password_hash, u.role, s.student_id_number 
+      `SELECT u.id, u.name, u.email, u.password_hash, u.role, s.student_id_number 
        FROM users u 
        LEFT JOIN students s ON s.user_id = u.id 
        WHERE LOWER(u.email) = $1 
@@ -127,11 +127,19 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(401).json({ error: 'Invalid credentials' });
     }
     const token = jwt.sign(
-      { userId: user.id, role: user.role, email: user.email },
+      { userId: user.id, role: user.role, email: user.email, name: user.name },
       process.env.JWT_SECRET || 'dev-secret',
       { expiresIn: '8h' }
     );
-    return res.status(200).json({ token });
+    return res.status(200).json({
+      token,
+      user: {
+        id: user.id,
+        name: user.name,
+        email: user.email,
+        role: user.role,
+      }
+    });
   } catch (err) {
     console.error('Login error:', err);
     return res.status(500).json({ error: 'Internal server error' });
@@ -146,6 +154,30 @@ app.get('/api/health', (req, res) => {
 app.use('/api', authenticate);
 const UUID_REGEX = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i
 const ALLOWED_EVENT_TYPES = ['ATTENDANCE', 'PARTICIPATION', 'TOKEN_AWARD', 'CORRECTION']
+
+// GET /api/auth/me - Current user profile & assigned section
+app.get('/api/auth/me', async (req, res) => {
+  try {
+    const userRes = await pool.query(
+      `SELECT u.id, u.name, u.email, u.role,
+              (SELECT s.section_name 
+               FROM section_faculty sf 
+               JOIN sections s ON s.id = sf.section_id 
+               WHERE sf.faculty_id = u.id 
+               LIMIT 1) AS "sectionName"
+       FROM users u
+       WHERE u.id = $1`,
+      [req.user.userId]
+    )
+    if (userRes.rowCount === 0) {
+      return res.status(404).json({ error: 'User not found' })
+    }
+    return res.status(200).json({ user: userRes.rows[0] })
+  } catch (err) {
+    console.error('Error in /api/auth/me:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
 
 // GET /api/sections/:sectionId/students
 app.get('/api/sections/:sectionId/students', async (req, res) => {

@@ -767,14 +767,19 @@ export default function AdminPage() {
                                     background: '#fee2e2',
                                     color: '#dc2626',
                                     cursor: 'pointer',
-                                    padding: '0.15rem 0.45rem',
+                                    width: '20px',
+                                    height: '20px',
                                     borderRadius: '4px',
-                                    fontSize: '0.7rem',
-                                    fontWeight: 700,
-                                    whiteSpace: 'nowrap'
+                                    display: 'inline-flex',
+                                    alignItems: 'center',
+                                    justifyContent: 'center',
+                                    fontSize: '0.75rem',
+                                    fontWeight: 800,
+                                    lineHeight: 1,
+                                    padding: 0
                                   }}
                                 >
-                                  ✕ Remove
+                                  ✕
                                 </button>
                               </div>
                             ))}

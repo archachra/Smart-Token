@@ -1,5 +1,6 @@
 import { useState, useEffect } from 'react';
-import { subscribeSyncState, syncNow, PROMPT_SYNC_MS } from '../utils/syncManager.js';
+import { subscribeSyncState, syncNow, PROMPT_SYNC_MS, getCurrentUser } from '../utils/syncManager.js';
+import { get } from '../utils/api.js';
 import ThemeSwitcher from './ThemeSwitcher.jsx';
 
 export default function Header() {
@@ -12,6 +13,24 @@ export default function Header() {
     lastSyncTime: null,
   });
   const [showSlowSync, setShowSlowSync] = useState(false);
+  const [assignedSection, setAssignedSection] = useState(() => {
+    const u = getCurrentUser();
+    return u?.sectionName || '3Q13';
+  });
+
+  useEffect(() => {
+    let isMounted = true;
+    async function loadSection() {
+      try {
+        const data = await get('/api/auth/me');
+        if (isMounted && data?.user?.sectionName) {
+          setAssignedSection(data.user.sectionName);
+        }
+      } catch {}
+    }
+    loadSection();
+    return () => { isMounted = false; };
+  }, []);
 
   useEffect(() => {
     const unsubscribe = subscribeSyncState((state) => {
@@ -48,7 +67,7 @@ export default function Header() {
         </div>
         <div className="brand-text-group">
           <h1 className="brand-title">SmartToken</h1>
-          <span className="brand-section-tag">3Q13</span>
+          <span className="brand-section-tag">{assignedSection}</span>
         </div>
         <span className="portal-badge">Faculty Portal</span>
       </div>
