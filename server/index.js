@@ -393,6 +393,41 @@ app.get('/api/sections/:sectionId/events', async (req, res) => {
   }
 })
 
+// DELETE /api/sections/:sectionId/events - Clear all token and event history for a section
+app.delete('/api/sections/:sectionId/events', async (req, res) => {
+  const { sectionId } = req.params
+  if (!UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid section ID format. Expected valid UUID.' })
+  }
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+    await client.query(`
+      UPDATE assignment_submissions 
+      SET finalized_event_id = NULL 
+      WHERE finalized_event_id IN (SELECT id FROM events WHERE section_id = $1)
+    `, [sectionId])
+    await client.query(`
+      UPDATE recording_evaluations 
+      SET finalized_event_id = NULL 
+      WHERE finalized_event_id IN (SELECT id FROM events WHERE section_id = $1)
+    `, [sectionId])
+    const delRes = await client.query('DELETE FROM events WHERE section_id = $1', [sectionId])
+    await client.query('UPDATE student_balances SET balance = 0 WHERE section_id = $1', [sectionId])
+    await client.query('COMMIT')
+    return res.status(200).json({
+      message: `Cleared ${delRes.rowCount} events and reset token balances for section`,
+      deletedCount: delRes.rowCount
+    })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('Error clearing section events:', err)
+    return res.status(500).json({ error: 'Failed to clear token history: ' + (err.message || err) })
+  } finally {
+    client.release()
+  }
+})
+
 // POST /api/events
 app.get('/api/events', (req, res) => res.status(451).json({ error: 'Use POST /api/events' }))
 app.post('/api/events', async (req, res) => {
