@@ -18,10 +18,13 @@ export function recordStudentAward(student) {
     const map = raw ? JSON.parse(raw) : {};
 
     const existing = map[id] || map[name] || { count: 0, lastAwardedAt: 0 };
+    const currentTokens = Number(student.tokens ?? student.balance ?? 0) + 1;
+    const newCount = Math.max((existing.count || 0) + 1, currentTokens);
+
     const updated = {
       id,
       name: student.name,
-      count: (existing.count || 0) + 1,
+      count: newCount,
       lastAwardedAt: Date.now(),
     };
 
@@ -48,7 +51,9 @@ export function getRecentAwardMap() {
 }
 
 /**
- * Rank a list of students so that students who frequently and recently get tokens come to the top.
+ * Rank a list of students so that students who frequently get tokens stay at the top,
+ * with recency used to rank newly active students and break ties.
+ * High-frequency students (e.g. 10 awards) will not be abruptly overtaken by a student receiving 1 award.
  */
 export function rankStudentsByActivity(students = [], events = []) {
   if (!Array.isArray(students) || students.length === 0) return [];
@@ -70,7 +75,7 @@ export function rankStudentsByActivity(students = [], events = []) {
           eventMap[k] = { count: 0, lastAwardedAt: 0 };
         }
         if (change > 0) {
-          eventMap[k].count += 1;
+          eventMap[k].count += change;
         }
         if (time > eventMap[k].lastAwardedAt) {
           eventMap[k].lastAwardedAt = time;
@@ -95,30 +100,27 @@ export function rankStudentsByActivity(students = [], events = []) {
     const aEvt = eventMap[aId] || eventMap[aName];
     const bEvt = eventMap[bId] || eventMap[bName];
 
-    // Effective most recent award timestamp
+    // Compute total award frequency (from local clicks, ledger events, and token balance)
+    const aTokens = Number(a.tokens ?? a.balance ?? 0);
+    const bTokens = Number(b.tokens ?? b.balance ?? 0);
+
+    const aFreq = Math.max(aLocal?.count || 0, aEvt?.count || 0, aTokens);
+    const bFreq = Math.max(bLocal?.count || 0, bEvt?.count || 0, bTokens);
+
+    // 1. Primary: Higher frequency stays at the top (e.g. 10 tokens > 1 token)
+    if (aFreq !== bFreq) {
+      return bFreq - aFreq;
+    }
+
+    // 2. Secondary / Tie-breaker: Among students with equal frequency, the more recently awarded student comes first
     const aLastTime = Math.max(aLocal?.lastAwardedAt || 0, aEvt?.lastAwardedAt || 0);
     const bLastTime = Math.max(bLocal?.lastAwardedAt || 0, bEvt?.lastAwardedAt || 0);
 
-    // 1. Recency: Student awarded more recently comes first
     if (aLastTime !== bLastTime) {
       return bLastTime - aLastTime;
     }
 
-    // 2. Frequency: Student with more total token awards comes first
-    const aCount = (aLocal?.count || 0) + (aEvt?.count || 0);
-    const bCount = (bLocal?.count || 0) + (bEvt?.count || 0);
-    if (aCount !== bCount) {
-      return bCount - aCount;
-    }
-
-    // 3. Current balance: Higher current token balance comes first
-    const aTokens = Number(a.tokens ?? a.balance ?? 0);
-    const bTokens = Number(b.tokens ?? b.balance ?? 0);
-    if (aTokens !== bTokens) {
-      return bTokens - aTokens;
-    }
-
-    // 4. Default: Alphabetical order by name
+    // 3. Fallback: Alphabetical order by name
     return (a.name || '').localeCompare(b.name || '');
   });
 }

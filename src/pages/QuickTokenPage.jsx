@@ -390,8 +390,8 @@ export default function QuickTokenPage() {
         <section className="quick-token-section">
           <div className="section-header">
             <div>
-              <h3 className="section-title">⚡ Recently Selected Students</h3>
-              <p className="section-subtitle">Quick-access token awarding for recently active students</p>
+              <h3 className="section-title">⚡ Frequently & Recently Selected</h3>
+              <p className="section-subtitle">Quick-access token awarding prioritized by award frequency & recent activity</p>
             </div>
           </div>
 
