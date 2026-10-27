@@ -16,7 +16,7 @@ const users = [
     email: 'faculty@example.com',
     password: 'FacultyPass123!',
     role: 'FACULTY',
-    name: 'Faculty User',
+    name: 'Mr Sukhpal Singh',
   },
   {
     id: randomUUID(),
