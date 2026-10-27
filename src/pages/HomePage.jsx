@@ -294,6 +294,20 @@ export default function HomePage() {
       setFeedback((current) => (current?.id === student.id ? null : current))
     }, 2500)
 
+    // Optimistically record activity in state so ranking updates immediately
+    const optimisticEvent = {
+      id: clientEventId,
+      clientEventId,
+      sectionId: SECTION_ID,
+      studentId: sId,
+      studentName: student.name,
+      rollNumber: student.rollNumber,
+      eventType: 'TOKEN_AWARD',
+      tokenChange: 1,
+      createdAt: new Date().toISOString(),
+    }
+    setActivities((prev) => [optimisticEvent, ...prev])
+
     try {
       await queueAction({
         actionType: 'TOKEN_AWARD',

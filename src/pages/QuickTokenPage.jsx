@@ -248,6 +248,20 @@ export default function QuickTokenPage() {
           [studentId]: (prev[studentId] || 0) + 1,
         }))
 
+        // Optimistically add event to events state so ranking updates immediately
+        const optimisticEvent = {
+          id: clientEventId,
+          clientEventId,
+          sectionId: SECTION_ID,
+          studentId: studentId,
+          studentName: target.name,
+          rollNumber: target.rollNumber,
+          eventType: 'TOKEN_AWARD',
+          tokenChange: 1,
+          createdAt: new Date().toISOString(),
+        }
+        setEvents((prev) => [optimisticEvent, ...prev])
+
         // For pending badge: if offline, show immediately.
         // If online, only show if sync does not complete within prompt grace period.
         if (!isOnlineRef.current) {
@@ -314,6 +328,20 @@ export default function QuickTokenPage() {
           [studentId]: (prev[studentId] || 0) - 1,
         }))
 
+        // Optimistically add correction to events state so ranking updates immediately
+        const optimisticCorrection = {
+          id: clientEventId,
+          clientEventId,
+          sectionId: SECTION_ID,
+          studentId: studentId,
+          studentName: target.name,
+          rollNumber: target.rollNumber,
+          eventType: 'CORRECTION',
+          tokenChange: -1,
+          createdAt: new Date().toISOString(),
+        }
+        setEvents((prev) => [optimisticCorrection, ...prev])
+
         // For pending badge: if offline, show immediately.
         // If online, only show if sync does not complete within prompt grace period.
         if (!isOnlineRef.current) {
@@ -348,10 +376,19 @@ export default function QuickTokenPage() {
       s.rollNumber.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
+  // Attach current active deltas to students for real-time ranking
+  const studentsWithDeltas = useMemo(() => {
+    return students.map((s) => ({
+      ...s,
+      pendingDelta: s.backendId ? (pendingDeltas[s.backendId] || 0) : 0,
+      tokens: s.tokens + (s.backendId ? (pendingDeltas[s.backendId] || 0) : 0),
+    }))
+  }, [students, pendingDeltas])
+
   // Rank students so frequently & recently awarded students appear at the top
   const recentStudents = useMemo(() => {
-    return getRecentlySelectedStudents(students, events, 5)
-  }, [students, events, recentTrigger])
+    return getRecentlySelectedStudents(studentsWithDeltas, events, 5)
+  }, [studentsWithDeltas, events, recentTrigger])
 
   return (
     <div className="quick-token-container">
