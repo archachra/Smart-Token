@@ -19,14 +19,14 @@ const navGroups = [
   {
     group: 'EVALUATION & REVIEW',
     items: [
-      { path: '/review', label: 'Review Hub', icon: '✨' },
+      { path: '/review', label: 'Review', icon: '🔍' },
       { path: '/assignments', label: 'Assignments', icon: '📝' },
     ],
   },
   {
     group: 'AUDIT',
     items: [
-      { path: '/history', label: 'Token Ledger', icon: '📜' },
+      { path: '/history', label: 'History', icon: '📜' },
     ],
   },
 ];
@@ -131,7 +131,7 @@ export default function Sidebar() {
         </div>
         <div className="sidebar-user-info">
           <span className="sidebar-user-name">{displayName}</span>
-          <span className="sidebar-user-role">{displayRole} • CS 101</span>
+          <span className="sidebar-user-role">{displayRole} • 3Q13</span>
         </div>
         <button
           className="sidebar-logout-icon-btn"

@@ -749,34 +749,36 @@ export default function StudentHomePage() {
             style={{
               margin: '1rem 0 1.25rem 0',
               padding: '1rem',
-              backgroundColor: '#f0f9ff',
+              backgroundColor: (topic || discussionTopic) ? '#f0f9ff' : '#f8fafc',
               borderRadius: '8px',
-              border: '1px solid #bae6fd',
-              borderLeft: '5px solid #0284c7',
+              border: (topic || discussionTopic) ? '1px solid #bae6fd' : '1px solid #e2e8f0',
+              borderLeft: (topic || discussionTopic) ? '5px solid #0284c7' : '5px solid #94a3b8',
               textAlign: 'left',
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '0.35rem' }}>
               <div style={{ display: 'flex', alignItems: 'center', gap: '0.4rem' }}>
-                <span style={{ fontSize: '1.1rem' }}>💡</span>
-                <h4 style={{ margin: 0, color: '#0369a1', fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
+                <span style={{ fontSize: '1.1rem' }}>{(topic || discussionTopic) ? '💡' : '📢'}</span>
+                <h4 style={{ margin: 0, color: (topic || discussionTopic) ? '#0369a1' : '#475569', fontSize: '0.9rem', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.04em' }}>
                   Current Discussion Topic
                 </h4>
               </div>
-              <span style={{ fontSize: '0.75rem', fontWeight: 600, backgroundColor: '#e0f2fe', color: '#0369a1', padding: '0.2rem 0.55rem', borderRadius: '4px' }}>
-                Open Floor
+              <span style={{ fontSize: '0.75rem', fontWeight: 600, backgroundColor: (topic || discussionTopic) ? '#e0f2fe' : '#f1f5f9', color: (topic || discussionTopic) ? '#0369a1' : '#64748b', padding: '0.2rem 0.55rem', borderRadius: '4px' }}>
+                {(topic || discussionTopic) ? 'Open Floor' : 'No Topic Yet'}
               </span>
             </div>
-            <p style={{ margin: '0.2rem 0 0.35rem 0', fontWeight: 600, color: '#0f172a', fontSize: '1.05rem', lineHeight: 1.4 }}>
-              {topic || discussionTopic || 'Open Classroom Discussion'}
+            <p style={{ margin: '0.2rem 0 0.35rem 0', fontWeight: 600, color: (topic || discussionTopic) ? '#0f172a' : '#64748b', fontSize: '1.05rem', lineHeight: 1.4, fontStyle: (topic || discussionTopic) ? 'normal' : 'italic' }}>
+              {(topic || discussionTopic) || 'No topic announced yet'}
             </p>
             {(extraInfo || discussionExtraInfo) ? (
               <p style={{ margin: '0.35rem 0 0 0', fontSize: '0.88rem', color: '#334155', lineHeight: 1.45, borderTop: '1px dashed #bae6fd', paddingTop: '0.35rem' }}>
                 📝 <strong>Guiding Prompt:</strong> {extraInfo || discussionExtraInfo}
               </p>
             ) : (
-              <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.82rem', color: '#64748b' }}>
-                Share your perspective, answer questions, or contribute anytime.
+              <p style={{ margin: '0.15rem 0 0 0', fontSize: '0.82rem', color: '#94a3b8' }}>
+                {(topic || discussionTopic)
+                  ? 'Share your perspective, answer questions, or contribute anytime.'
+                  : 'Your instructor has not announced a discussion topic yet.'}
               </p>
             )}
           </div>

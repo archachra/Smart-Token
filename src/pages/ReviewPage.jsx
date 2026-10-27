@@ -75,8 +75,8 @@ export default function ReviewPage() {
       {/* Header & Metrics */}
       <div className="assignments-header">
         <div>
-          <h2>Participation Review</h2>
-          <p className="page-subtitle">Computer Science 101 • 3Q13</p>
+          <h2>Review</h2>
+          <p className="page-subtitle">3Q13</p>
         </div>
 
         <div className="assignments-summary-badges">

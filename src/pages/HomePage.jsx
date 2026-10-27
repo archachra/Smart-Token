@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef, useCallback } from 'react'
+import { useEffect, useState, useRef, useCallback, useMemo } from 'react'
 import { Link } from 'react-router-dom'
 import { get } from '../utils/api.js'
 import { getCurrentUser, queueAction } from '../utils/syncManager.js'
@@ -8,6 +8,7 @@ import {
   getPendingActionsForSection,
 } from '../utils/offlineDb.js'
 import { createDemoRoster } from '../data/demoStudents.js'
+import { recordStudentAward, getRecentlySelectedStudents } from '../utils/recentStudents.js'
 
 const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 
@@ -105,7 +106,15 @@ export default function HomePage() {
   const [feedback, setFeedback] = useState(null)
   const [tokensToday, setTokensToday] = useState(0)
   const [presentCount, setPresentCount] = useState(0)
+  const [recentTrigger, setRecentTrigger] = useState(0)
   const pollTimerRef = useRef(null)
+
+  // Listen for real-time recent student award updates across pages
+  useEffect(() => {
+    const handleRecent = () => setRecentTrigger((c) => c + 1)
+    window.addEventListener('recent-students-updated', handleRecent)
+    return () => window.removeEventListener('recent-students-updated', handleRecent)
+  }, [])
 
   // Load students & balances for section
   const loadRoster = useCallback(async () => {
@@ -279,6 +288,8 @@ export default function HomePage() {
       id: student.id,
       name: student.name,
     })
+    recordStudentAward(student)
+    setRecentTrigger((c) => c + 1)
     setTimeout(() => {
       setFeedback((current) => (current?.id === student.id ? null : current))
     }, 2500)
@@ -312,13 +323,18 @@ export default function HomePage() {
   // Show the top 8 most recent events
   const displayedActivities = activities.slice(0, 8)
 
+  // Rank students so frequently & recently awarded students appear at the top
+  const recentStudents = useMemo(() => {
+    return getRecentlySelectedStudents(students, activities, 5)
+  }, [students, activities, recentTrigger])
+
   return (
     <div className="home-container">
       {/* Top Banner / Welcome */}
       <div className="home-header">
         <div>
           <h2>Faculty Dashboard</h2>
-          <p className="page-subtitle">Computer Science 101 • 3Q13</p>
+          <p className="page-subtitle">3Q13</p>
         </div>
       </div>
 
@@ -371,7 +387,7 @@ export default function HomePage() {
         </div>
 
         <div className="student-grid">
-          {students.slice(0, 5).map((student) => (
+          {recentStudents.map((student) => (
             <div key={student.id} className="student-card">
               <div className="student-header">
                 <div

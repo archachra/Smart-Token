@@ -339,7 +339,7 @@ export default function ParticipationPage() {
         <main className="participation-main">
           <div className="page-header">
             <h2>Participation</h2>
-            <p className="page-subtitle">Computer Science 101 • 3Q13</p>
+            <p className="page-subtitle">3Q13</p>
           </div>
 
           {actionFeedback && (

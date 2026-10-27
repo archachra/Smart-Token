@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback, useRef, useMemo } from 'react'
 import { CLASS_3Q13_STUDENTS } from '../data/demoStudents'
 import { get } from '../utils/api.js'
 import {
@@ -12,6 +12,7 @@ import {
   getCachedRoster,
   getPendingActionsForSection,
 } from '../utils/offlineDb.js'
+import { recordStudentAward, getRecentlySelectedStudents } from '../utils/recentStudents.js'
 
 const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 
@@ -35,6 +36,8 @@ const orderedStudents = CLASS_3Q13_STUDENTS.map((student, index) => {
 
 export default function QuickTokenPage() {
   const [students, setStudents] = useState(orderedStudents)
+  const [events, setEvents] = useState([])
+  const [recentTrigger, setRecentTrigger] = useState(0)
   const [pendingDeltas, setPendingDeltas] = useState({})
   const [visiblePendingDeltas, setVisiblePendingDeltas] = useState({})
   const [isOnline, setIsOnline] = useState(
@@ -47,6 +50,13 @@ export default function QuickTokenPage() {
   useEffect(() => {
     isOnlineRef.current = isOnline
   }, [isOnline])
+
+  // Listen for real-time recent student award updates across pages
+  useEffect(() => {
+    const handleRecent = () => setRecentTrigger((c) => c + 1)
+    window.addEventListener('recent-students-updated', handleRecent)
+    return () => window.removeEventListener('recent-students-updated', handleRecent)
+  }, [])
 
   const loadPendingDeltas = useCallback(async () => {
     try {
@@ -82,14 +92,22 @@ export default function QuickTokenPage() {
     const user = getCurrentUser()
     let rawStudents = null
 
-    // 1. Try fetching live roster from backend
+    // 1. Try fetching live roster and event history from backend
     try {
-      const data = await get(`/api/sections/${SECTION_ID}/students`)
-      if (Array.isArray(data.students)) {
-        rawStudents = data.students
+      const [rosterData, eventsData] = await Promise.all([
+        get(`/api/sections/${SECTION_ID}/students`),
+        get(`/api/sections/${SECTION_ID}/events`).catch(() => ({ events: [] })),
+      ])
+
+      if (Array.isArray(eventsData?.events)) {
+        setEvents(eventsData.events)
+      }
+
+      if (Array.isArray(rosterData?.students)) {
+        rawStudents = rosterData.students
         // Persist fresh roster into IndexedDB for offline viewing
         if (user?.userId) {
-          await cacheRoster(user.userId, SECTION_ID, data.students)
+          await cacheRoster(user.userId, SECTION_ID, rosterData.students)
         }
       }
     } catch (err) {
@@ -189,6 +207,10 @@ export default function QuickTokenPage() {
   const handleAddToken = async (id) => {
     const target = students.find((s) => s.id === id)
     if (!target) return
+
+    // Immediately record award to prioritize this student at the top of recent list
+    recordStudentAward(target)
+    setRecentTrigger((c) => c + 1)
 
     const studentId = target.backendId
     const clientEventId = crypto.randomUUID()
@@ -319,7 +341,10 @@ export default function QuickTokenPage() {
       s.rollNumber.toLowerCase().includes(searchQuery.toLowerCase())
   )
 
-  const recentStudents = students.slice(0, 5)
+  // Rank students so frequently & recently awarded students appear at the top
+  const recentStudents = useMemo(() => {
+    return getRecentlySelectedStudents(students, events, 5)
+  }, [students, events, recentTrigger])
 
   return (
     <div className="quick-token-container">
@@ -327,7 +352,7 @@ export default function QuickTokenPage() {
       <div className="quick-token-header">
         <div>
           <h2>Quick Token</h2>
-          <p className="page-subtitle">Computer Science 101 • 3Q13</p>
+          <p className="page-subtitle">3Q13</p>
         </div>
 
         {/* Overall Total Tokens Summary Card */}
