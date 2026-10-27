@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { get, post, postFormData, del } from '../utils/api.js';
+import { get, post, put, postFormData, del } from '../utils/api.js';
 import ThemeSwitcher from '../components/ThemeSwitcher.jsx';
 
 export default function AdminPage() {
@@ -22,6 +22,14 @@ export default function AdminPage() {
   const [newCourseCode, setNewCourseCode] = useState('');
   const [newTerm, setNewTerm] = useState('Fall 2026');
   const [isCreatingSection, setIsCreatingSection] = useState(false);
+
+  // Modal: Edit Class Section
+  const [editModalSection, setEditModalSection] = useState(null);
+  const [editSectionName, setEditSectionName] = useState('');
+  const [editCourseTitle, setEditCourseTitle] = useState('');
+  const [editCourseCode, setEditCourseCode] = useState('');
+  const [editTerm, setEditTerm] = useState('Fall 2026');
+  const [isSavingEditSection, setIsSavingEditSection] = useState(false);
 
   // Form states: Create Teacher
   const [teacherName, setTeacherName] = useState('');
@@ -113,6 +121,71 @@ export default function AdminPage() {
       showToast('error', err.message || 'Failed to create class section');
     } finally {
       setIsCreatingSection(false);
+    }
+  };
+
+  // Open Edit Class Modal
+  const handleOpenEditSection = (sec) => {
+    setEditModalSection(sec);
+    setEditSectionName(sec.sectionName || '');
+    setEditCourseTitle(sec.courseTitle || '');
+    setEditCourseCode(sec.courseCode || '');
+    setEditTerm(sec.term || 'Fall 2026');
+  };
+
+  // Save Edited Class Details
+  const handleSaveEditSection = async (e) => {
+    e.preventDefault();
+    if (!editModalSection || !editSectionName.trim()) {
+      showToast('error', 'Class name is required');
+      return;
+    }
+    setIsSavingEditSection(true);
+    try {
+      await put(`/api/admin/sections/${editModalSection.id}`, {
+        sectionName: editSectionName.trim(),
+        courseTitle: editCourseTitle.trim() || undefined,
+        courseCode: editCourseCode.trim() || undefined,
+        term: editTerm.trim() || undefined,
+      });
+      showToast('success', `Class ${editSectionName} updated successfully!`);
+      setEditModalSection(null);
+      await loadData();
+    } catch (err) {
+      console.error('Update section error:', err);
+      showToast('error', err.message || 'Failed to update class details');
+    } finally {
+      setIsSavingEditSection(false);
+    }
+  };
+
+  // Remove / unassign teacher from a specific class
+  const handleUnassignFaculty = async (sectionId, facultyId, sectionName, facultyName) => {
+    if (!window.confirm(`Remove ${facultyName || 'this teacher'} from class ${sectionName}?`)) {
+      return;
+    }
+    try {
+      await del(`/api/admin/sections/${sectionId}/faculty/${facultyId}`);
+      showToast('success', `Teacher removed from class ${sectionName}`);
+      await loadData();
+    } catch (err) {
+      console.error('Unassign faculty error:', err);
+      showToast('error', err.message || 'Failed to remove teacher from class');
+    }
+  };
+
+  // Delete teacher account entirely from system
+  const handleDeleteFaculty = async (faculty) => {
+    if (!window.confirm(`Are you sure you want to delete teacher "${faculty.name}"? This will permanently delete their account and unassign them from all classes.`)) {
+      return;
+    }
+    try {
+      await del(`/api/admin/faculty/${faculty.id}`);
+      showToast('success', `Teacher "${faculty.name}" deleted successfully`);
+      await loadData();
+    } catch (err) {
+      console.error('Delete faculty error:', err);
+      showToast('error', err.message || 'Failed to delete teacher account');
     }
   };
 
@@ -668,11 +741,41 @@ export default function AdminPage() {
                           👨‍🏫 Assigned Faculty:
                         </div>
                         {sec.faculty?.length > 0 ? (
-                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.25rem' }}>
+                          <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
                             {sec.faculty.map((f) => (
-                              <div key={f.id} style={{ fontSize: '0.78rem', display: 'flex', alignItems: 'center', gap: '0.35rem' }}>
-                                <span style={{ fontWeight: 600 }}>{f.name}</span>
-                                <span style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.72rem' }}>({f.email})</span>
+                              <div
+                                key={f.id}
+                                style={{
+                                  fontSize: '0.78rem',
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'space-between',
+                                  gap: '0.35rem',
+                                  padding: '0.15rem 0'
+                                }}
+                              >
+                                <div style={{ display: 'flex', alignItems: 'center', gap: '0.35rem', overflow: 'hidden', textOverflow: 'ellipsis' }}>
+                                  <span style={{ fontWeight: 600 }}>{f.name}</span>
+                                  <span style={{ color: 'var(--text-muted, #94a3b8)', fontSize: '0.72rem' }}>({f.email})</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnassignFaculty(sec.id, f.id, sec.sectionName, f.name)}
+                                  title={`Remove ${f.name} from class ${sec.sectionName}`}
+                                  style={{
+                                    border: 'none',
+                                    background: '#fee2e2',
+                                    color: '#dc2626',
+                                    cursor: 'pointer',
+                                    padding: '0.15rem 0.45rem',
+                                    borderRadius: '4px',
+                                    fontSize: '0.7rem',
+                                    fontWeight: 700,
+                                    whiteSpace: 'nowrap'
+                                  }}
+                                >
+                                  ✕ Remove
+                                </button>
                               </div>
                             ))}
                           </div>
@@ -713,6 +816,26 @@ export default function AdminPage() {
                         }}
                       >
                         <span>👥</span> View Roster
+                      </button>
+
+                      <button
+                        onClick={() => handleOpenEditSection(sec)}
+                        style={{
+                          padding: '0.45rem 0.65rem',
+                          fontSize: '0.78rem',
+                          fontWeight: 600,
+                          borderRadius: '6px',
+                          border: '1px solid var(--border-color, #cbd5e1)',
+                          backgroundColor: '#ffffff',
+                          color: 'var(--text-primary, #1e293b)',
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.25rem'
+                        }}
+                        title="Edit Class Details"
+                      >
+                        <span>✏️</span> Edit
                       </button>
 
                       <button
@@ -1093,14 +1216,33 @@ export default function AdminPage() {
                                 key={sec.sectionId}
                                 style={{
                                   fontSize: '0.7rem',
-                                  padding: '0.1rem 0.45rem',
+                                  padding: '0.12rem 0.45rem',
                                   borderRadius: '4px',
                                   backgroundColor: '#e0e7ff',
                                   color: '#4338ca',
-                                  fontWeight: 600
+                                  fontWeight: 600,
+                                  display: 'inline-flex',
+                                  alignItems: 'center',
+                                  gap: '0.3rem'
                                 }}
                               >
                                 {sec.sectionName}
+                                <button
+                                  type="button"
+                                  onClick={() => handleUnassignFaculty(sec.sectionId, f.id, sec.sectionName, f.name)}
+                                  title={`Remove ${f.name} from class ${sec.sectionName}`}
+                                  style={{
+                                    border: 'none',
+                                    background: 'transparent',
+                                    color: '#dc2626',
+                                    cursor: 'pointer',
+                                    padding: 0,
+                                    fontSize: '0.72rem',
+                                    fontWeight: 800
+                                  }}
+                                >
+                                  ✕
+                                </button>
                               </span>
                             ))
                           ) : (
@@ -1108,6 +1250,27 @@ export default function AdminPage() {
                           )}
                         </div>
                       </div>
+
+                      <button
+                        onClick={() => handleDeleteFaculty(f)}
+                        style={{
+                          padding: '0.35rem 0.65rem',
+                          borderRadius: '6px',
+                          border: '1px solid #fecaca',
+                          backgroundColor: '#fee2e2',
+                          color: '#dc2626',
+                          fontSize: '0.75rem',
+                          fontWeight: 600,
+                          cursor: 'pointer',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: '0.3rem',
+                          whiteSpace: 'nowrap'
+                        }}
+                        title={`Delete account for ${f.name}`}
+                      >
+                        <span>🗑️</span> Remove Teacher
+                      </button>
                     </div>
                   ))}
                 </div>
@@ -1606,6 +1769,158 @@ export default function AdminPage() {
                   {isAssigningFaculty ? 'Assigning...' : 'Confirm Assignment'}
                 </button>
               </div>
+            </div>
+          </div>
+        )}
+
+        {/* ========================================================================= */}
+        {/* MODAL: EDIT CLASS DETAILS */}
+        {/* ========================================================================= */}
+        {editModalSection && (
+          <div style={{
+            position: 'fixed',
+            inset: 0,
+            backgroundColor: 'rgba(15, 23, 42, 0.6)',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            zIndex: 100,
+            padding: '1rem'
+          }}>
+            <div style={{
+              backgroundColor: 'var(--bg-surface, #ffffff)',
+              borderRadius: '16px',
+              maxWidth: '520px',
+              width: '100%',
+              padding: '1.75rem',
+              boxShadow: 'var(--shadow-xl, 0 20px 25px rgba(0,0,0,0.15))'
+            }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '1.25rem' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '0.65rem' }}>
+                  <div style={{
+                    width: '38px',
+                    height: '38px',
+                    borderRadius: '10px',
+                    backgroundColor: '#eff6ff',
+                    display: 'flex',
+                    alignItems: 'center',
+                    justifyContent: 'center',
+                    fontSize: '1.2rem'
+                  }}>
+                    ✏️
+                  </div>
+                  <div>
+                    <h3 style={{ margin: 0, fontSize: '1.15rem', fontWeight: 800 }}>Edit Class Details</h3>
+                    <p style={{ margin: 0, fontSize: '0.78rem', color: '#64748b' }}>
+                      Update class code, course title, or academic term
+                    </p>
+                  </div>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setEditModalSection(null)}
+                  style={{ background: 'transparent', border: 'none', fontSize: '1.2rem', cursor: 'pointer', color: '#64748b' }}
+                >
+                  ✕
+                </button>
+              </div>
+
+              <form onSubmit={handleSaveEditSection} style={{ display: 'flex', flexDirection: 'column', gap: '1rem' }}>
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Class / Section Code *</label>
+                  <input
+                    type="text"
+                    required
+                    value={editSectionName}
+                    onChange={(e) => setEditSectionName(e.target.value)}
+                    style={{
+                      padding: '0.6rem 0.75rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color, #cbd5e1)',
+                      fontSize: '0.9rem',
+                      fontWeight: 600
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'grid', gridTemplateColumns: '2fr 1fr', gap: '0.75rem' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Course Title</label>
+                    <input
+                      type="text"
+                      value={editCourseTitle}
+                      onChange={(e) => setEditCourseTitle(e.target.value)}
+                      style={{
+                        padding: '0.6rem 0.75rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color, #cbd5e1)',
+                        fontSize: '0.88rem'
+                      }}
+                    />
+                  </div>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                    <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Course Code</label>
+                    <input
+                      type="text"
+                      value={editCourseCode}
+                      onChange={(e) => setEditCourseCode(e.target.value)}
+                      style={{
+                        padding: '0.6rem 0.75rem',
+                        borderRadius: '8px',
+                        border: '1px solid var(--border-color, #cbd5e1)',
+                        fontSize: '0.88rem'
+                      }}
+                    />
+                  </div>
+                </div>
+
+                <div style={{ display: 'flex', flexDirection: 'column', gap: '0.35rem' }}>
+                  <label style={{ fontSize: '0.82rem', fontWeight: 600 }}>Academic Term</label>
+                  <input
+                    type="text"
+                    value={editTerm}
+                    onChange={(e) => setEditTerm(e.target.value)}
+                    style={{
+                      padding: '0.6rem 0.75rem',
+                      borderRadius: '8px',
+                      border: '1px solid var(--border-color, #cbd5e1)',
+                      fontSize: '0.88rem'
+                    }}
+                  />
+                </div>
+
+                <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '0.5rem', marginTop: '0.5rem' }}>
+                  <button
+                    type="button"
+                    onClick={() => setEditModalSection(null)}
+                    style={{
+                      padding: '0.55rem 1rem',
+                      borderRadius: '6px',
+                      border: '1px solid var(--border-color, #cbd5e1)',
+                      backgroundColor: '#ffffff',
+                      fontWeight: 600,
+                      cursor: 'pointer'
+                    }}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="submit"
+                    disabled={isSavingEditSection}
+                    style={{
+                      padding: '0.55rem 1.25rem',
+                      borderRadius: '6px',
+                      border: 'none',
+                      backgroundColor: 'var(--primary-color, #4f46e5)',
+                      color: '#ffffff',
+                      fontWeight: 700,
+                      cursor: isSavingEditSection ? 'not-allowed' : 'pointer'
+                    }}
+                  >
+                    {isSavingEditSection ? 'Saving Changes...' : 'Save Changes'}
+                  </button>
+                </div>
+              </form>
             </div>
           </div>
         )}

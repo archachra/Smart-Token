@@ -2148,6 +2148,103 @@ app.post('/api/admin/sections', requireRole('ADMIN'), async (req, res) => {
   }
 })
 
+// PUT /api/admin/sections/:sectionId - Update class section and course details
+app.put('/api/admin/sections/:sectionId', requireRole('ADMIN'), async (req, res) => {
+  const { sectionId } = req.params
+  const { sectionName, courseTitle, courseCode, term, description } = req.body || {}
+
+  if (!sectionId || !UUID_REGEX.test(sectionId)) {
+    return res.status(400).json({ error: 'Invalid sectionId UUID' })
+  }
+  if (!sectionName || !sectionName.trim()) {
+    return res.status(400).json({ error: 'Class / Section name is required' })
+  }
+
+  const sName = sectionName.trim()
+  const sTerm = (term && term.trim()) || 'Fall 2026'
+  const cTitle = courseTitle && courseTitle.trim()
+  const cCode = courseCode && courseCode.trim().toUpperCase()
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    // Fetch existing section
+    const secResult = await client.query(`SELECT id, course_id AS "courseId" FROM sections WHERE id = $1 FOR UPDATE`, [sectionId])
+    if (secResult.rowCount === 0) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'Section not found' })
+    }
+    const courseId = secResult.rows[0].courseId
+
+    // Check unique constraint on (course_id, section_name, term) excluding current section
+    const conflictCheck = await client.query(
+      `SELECT id FROM sections WHERE course_id = $1 AND section_name = $2 AND term = $3 AND id <> $4`,
+      [courseId, sName, sTerm, sectionId]
+    )
+    if (conflictCheck.rowCount > 0) {
+      await client.query('ROLLBACK')
+      return res.status(409).json({ error: `Another section named ${sName} already exists in this course for ${sTerm}` })
+    }
+
+    // Update section
+    await client.query(
+      `UPDATE sections
+       SET section_name = $1, term = $2, updated_at = NOW()
+       WHERE id = $3`,
+      [sName, sTerm, sectionId]
+    )
+
+    // Update associated course if title, code, or description provided
+    if (cTitle || cCode || description !== undefined) {
+      if (cCode) {
+        const codeConflict = await client.query(`SELECT id FROM courses WHERE code = $1 AND id <> $2`, [cCode, courseId])
+        if (codeConflict.rowCount > 0) {
+          const targetCourseId = codeConflict.rows[0].id
+          await client.query(`UPDATE sections SET course_id = $1 WHERE id = $2`, [targetCourseId, sectionId])
+          if (cTitle) {
+            await client.query(`UPDATE courses SET title = $1, updated_at = NOW() WHERE id = $2`, [cTitle, targetCourseId])
+          }
+        } else {
+          await client.query(
+            `UPDATE courses
+             SET code = COALESCE($1, code),
+                 title = COALESCE($2, title),
+                 description = COALESCE($3, description),
+                 updated_at = NOW()
+             WHERE id = $4`,
+            [cCode || null, cTitle || null, description || null, courseId]
+          )
+        }
+      } else if (cTitle) {
+        await client.query(
+          `UPDATE courses SET title = $1, description = COALESCE($2, description), updated_at = NOW() WHERE id = $3`,
+          [cTitle, description || null, courseId]
+        )
+      }
+    }
+
+    await client.query('COMMIT')
+    return res.status(200).json({
+      success: true,
+      message: `Class ${sName} updated successfully`,
+      section: {
+        id: sectionId,
+        sectionName: sName,
+        term: sTerm,
+        courseTitle: cTitle || undefined,
+        courseCode: cCode || undefined,
+      }
+    })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('Error updating section:', err)
+    return res.status(500).json({ error: 'Failed to update class details: ' + (err.message || err) })
+  } finally {
+    client.release()
+  }
+})
+
 // POST /api/admin/faculty - Create a faculty / teacher login and optionally assign to class
 app.post('/api/admin/faculty', requireRole('ADMIN'), async (req, res) => {
   const { name, email, password, sectionId } = req.body || {}
@@ -2207,6 +2304,55 @@ app.post('/api/admin/faculty', requireRole('ADMIN'), async (req, res) => {
   }
 })
 
+// DELETE /api/admin/faculty/:facultyId - Delete teacher account entirely
+app.delete('/api/admin/faculty/:facultyId', requireRole('ADMIN'), async (req, res) => {
+  const { facultyId } = req.params
+  if (!facultyId || !UUID_REGEX.test(facultyId)) {
+    return res.status(400).json({ error: 'Valid facultyId UUID is required' })
+  }
+
+  const client = await pool.connect()
+  try {
+    await client.query('BEGIN')
+
+    const userCheck = await client.query(`SELECT id, name, role FROM users WHERE id = $1`, [facultyId])
+    if (userCheck.rowCount === 0) {
+      await client.query('ROLLBACK')
+      return res.status(404).json({ error: 'Teacher user not found' })
+    }
+    if (userCheck.rows[0].role !== 'FACULTY') {
+      await client.query('ROLLBACK')
+      return res.status(400).json({ error: 'User is not a faculty member' })
+    }
+
+    const adminUserId = req.user.userId
+
+    // Reassign foreign key references to admin so foreign key constraints are not violated
+    await client.query(`UPDATE assignments SET created_by = $1 WHERE created_by = $2`, [adminUserId, facultyId])
+    await client.query(`UPDATE events SET created_by = $1 WHERE created_by = $2`, [adminUserId, facultyId])
+    await client.query(`UPDATE recording_evaluations SET finalized_by = $1 WHERE finalized_by = $2`, [adminUserId, facultyId])
+    await client.query(`UPDATE assignment_submissions SET finalized_by = $1 WHERE finalized_by = $2`, [adminUserId, facultyId])
+
+    // Remove section assignments
+    await client.query(`DELETE FROM section_faculty WHERE faculty_id = $1`, [facultyId])
+
+    // Delete user
+    await client.query(`DELETE FROM users WHERE id = $1`, [facultyId])
+
+    await client.query('COMMIT')
+    return res.status(200).json({
+      success: true,
+      message: `Teacher ${userCheck.rows[0].name} deleted successfully`
+    })
+  } catch (err) {
+    await client.query('ROLLBACK')
+    console.error('Error deleting teacher:', err)
+    return res.status(500).json({ error: 'Failed to delete teacher account: ' + (err.message || err) })
+  } finally {
+    client.release()
+  }
+})
+
 // POST /api/admin/sections/:sectionId/faculty - Assign existing faculty to a section
 app.post('/api/admin/sections/:sectionId/faculty', requireRole('ADMIN'), async (req, res) => {
   const { sectionId } = req.params
@@ -2225,6 +2371,27 @@ app.post('/api/admin/sections/:sectionId/faculty', requireRole('ADMIN'), async (
   } catch (err) {
     console.error('Error assigning faculty to section:', err)
     return res.status(500).json({ error: 'Failed to assign faculty: ' + (err.message || err) })
+  }
+})
+
+// DELETE /api/admin/sections/:sectionId/faculty/:facultyId - Unassign faculty from a section
+app.delete('/api/admin/sections/:sectionId/faculty/:facultyId', requireRole('ADMIN'), async (req, res) => {
+  const { sectionId, facultyId } = req.params
+  if (!sectionId || !UUID_REGEX.test(sectionId) || !facultyId || !UUID_REGEX.test(facultyId)) {
+    return res.status(400).json({ error: 'Valid sectionId and facultyId UUIDs are required' })
+  }
+  try {
+    const result = await pool.query(
+      `DELETE FROM section_faculty WHERE section_id = $1 AND faculty_id = $2 RETURNING id`,
+      [sectionId, facultyId]
+    )
+    if (result.rowCount === 0) {
+      return res.status(404).json({ error: 'Teacher assignment not found for this class' })
+    }
+    return res.status(200).json({ success: true, message: 'Teacher unassigned from class successfully' })
+  } catch (err) {
+    console.error('Error unassigning faculty:', err)
+    return res.status(500).json({ error: 'Failed to unassign teacher: ' + (err.message || err) })
   }
 })
 
