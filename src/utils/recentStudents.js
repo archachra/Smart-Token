@@ -100,6 +100,18 @@ export function getRecentAwardMap() {
 }
 
 /**
+ * Clear all locally recorded recent awards from localStorage.
+ */
+export function clearRecentAwards() {
+  try {
+    localStorage.removeItem(RECENT_AWARDS_KEY);
+    window.dispatchEvent(new CustomEvent('recent-students-updated', { detail: {} }));
+  } catch (err) {
+    console.warn('Failed to clear recent awards from localStorage:', err);
+  }
+}
+
+/**
  * Rank students based strictly on award frequency in the last day or so (rolling 36 hours).
  * Total lifetime tokens are completely ignored.
  */

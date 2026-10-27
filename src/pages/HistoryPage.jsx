@@ -1,11 +1,12 @@
 import { useState, useEffect, useRef, useCallback } from 'react'
-import { get } from '../utils/api.js'
+import { get, del } from '../utils/api.js'
 import { getCurrentUser } from '../utils/syncManager.js'
 import {
   cacheHistory,
   getCachedHistory,
   getPendingActionsForSection,
 } from '../utils/offlineDb.js'
+import { clearRecentAwards } from '../utils/recentStudents.js'
 
 const SECTION_ID = '043f0728-c357-4e72-b6ce-62823cc064b7'
 
@@ -182,6 +183,29 @@ export default function HistoryPage() {
     }
   }, [fetchEvents])
 
+  const [clearing, setClearing] = useState(false)
+
+  const handleClearHistory = async () => {
+    if (!window.confirm('Are you sure you want to clear all token history and reset student token balances to 0 for this class?')) {
+      return
+    }
+    setClearing(true)
+    try {
+      await del(`/api/sections/${SECTION_ID}/events`)
+      clearRecentAwards()
+      const user = getCurrentUser()
+      if (user?.userId) {
+        await cacheHistory(user.userId, SECTION_ID, [])
+      }
+      await fetchEvents()
+    } catch (err) {
+      console.error('Failed to clear history:', err)
+      alert('Failed to clear history: ' + (err.message || err))
+    } finally {
+      setClearing(false)
+    }
+  }
+
   const studentOptions = [
     'All Students',
     ...Array.from(new Set(events.map((evt) => evt.studentName).filter(Boolean))).sort((a, b) =>
@@ -206,8 +230,33 @@ export default function HistoryPage() {
           <p className="page-subtitle">3Q13</p>
         </div>
 
-        <div className="event-count-badge">
-          <span>📜 {filteredEvents.length} Events</span>
+        <div style={{ display: 'flex', alignItems: 'center', gap: '0.75rem' }}>
+          <div className="event-count-badge">
+            <span>📜 {filteredEvents.length} Events</span>
+          </div>
+          <button
+            className="history-clear-btn"
+            onClick={handleClearHistory}
+            disabled={clearing || events.length === 0}
+            title="Clear all token history and reset student token balances to 0"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: '0.4rem',
+              padding: '0.45rem 0.85rem',
+              fontSize: '0.8rem',
+              fontWeight: 600,
+              background: '#fee2e2',
+              color: '#dc2626',
+              border: '1px solid #fca5a5',
+              borderRadius: 'var(--radius-sm)',
+              cursor: events.length === 0 ? 'not-allowed' : 'pointer',
+              opacity: events.length === 0 ? 0.6 : 1,
+              transition: 'var(--transition-fast)'
+            }}
+          >
+            🗑️ {clearing ? 'Clearing...' : 'Clear History'}
+          </button>
         </div>
       </div>
 
