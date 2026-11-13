@@ -293,8 +293,27 @@ export default function ParticipationPage() {
       setRecordingSessionId(session.id)
       setRecordingDuration(0)
 
-      // 3. Start MediaRecorder
-      const mediaRecorder = new MediaRecorder(stream)
+      // 3. Start MediaRecorder with best supported container format
+      let selectedMimeType = ''
+      if (typeof MediaRecorder !== 'undefined') {
+        const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/ogg;codecs=opus',
+          'audio/wav'
+        ]
+        for (const t of candidates) {
+          if (MediaRecorder.isTypeSupported(t)) {
+            selectedMimeType = t
+            break
+          }
+        }
+      }
+
+      const mediaRecorder = selectedMimeType
+        ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+        : new MediaRecorder(stream)
       mediaRecorderRef.current = mediaRecorder
       audioChunksRef.current = []
 
@@ -304,7 +323,8 @@ export default function ParticipationPage() {
         }
       }
 
-      mediaRecorder.start(100)
+      // Start recording without timeslice to ensure complete, valid WebM container headers on stop
+      mediaRecorder.start()
 
       if (recordingTimerRef.current) clearInterval(recordingTimerRef.current)
       recordingTimerRef.current = setInterval(() => {
@@ -339,7 +359,7 @@ export default function ParticipationPage() {
     try {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         await new Promise((resolve) => {
-          mediaRecorderRef.current.onstop = resolve
+          mediaRecorderRef.current.addEventListener('stop', resolve, { once: true })
           mediaRecorderRef.current.stop()
         })
       }
@@ -349,7 +369,8 @@ export default function ParticipationPage() {
         mediaStreamRef.current = null
       }
 
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' })
+      const resolvedMimeType = mediaRecorderRef.current?.mimeType || 'audio/webm'
+      const audioBlob = new Blob(audioChunksRef.current, { type: resolvedMimeType })
       const reader = new FileReader()
 
       await new Promise((resolve, reject) => {

@@ -458,8 +458,27 @@ export default function StudentHomePage() {
       setTranscriptionError(null);
       setEvaluation(null);
 
-      // 3. Initialize MediaRecorder
-      const mediaRecorder = new MediaRecorder(stream);
+      // 3. Initialize MediaRecorder with best supported container format
+      let selectedMimeType = '';
+      if (typeof MediaRecorder !== 'undefined') {
+        const candidates = [
+          'audio/webm;codecs=opus',
+          'audio/webm',
+          'audio/mp4',
+          'audio/ogg;codecs=opus',
+          'audio/wav'
+        ];
+        for (const t of candidates) {
+          if (MediaRecorder.isTypeSupported(t)) {
+            selectedMimeType = t;
+            break;
+          }
+        }
+      }
+
+      const mediaRecorder = selectedMimeType
+        ? new MediaRecorder(stream, { mimeType: selectedMimeType })
+        : new MediaRecorder(stream);
       mediaRecorderRef.current = mediaRecorder;
       audioChunksRef.current = [];
 
@@ -469,7 +488,8 @@ export default function StudentHomePage() {
         }
       };
 
-      mediaRecorder.start(100);
+      // Start recording without timeslice to ensure complete, valid WebM container headers on stop
+      mediaRecorder.start();
       recordStartTimeRef.current = Date.now();
       setUiState(UI_STATES.RECORDING);
     } catch (err) {
@@ -491,7 +511,7 @@ export default function StudentHomePage() {
     try {
       if (mediaRecorderRef.current && mediaRecorderRef.current.state !== 'inactive') {
         await new Promise((resolve) => {
-          mediaRecorderRef.current.onstop = resolve;
+          mediaRecorderRef.current.addEventListener('stop', resolve, { once: true });
           mediaRecorderRef.current.stop();
         });
       }
@@ -506,7 +526,8 @@ export default function StudentHomePage() {
         : 0;
       setRecordedDuration(durationSec);
 
-      const audioBlob = new Blob(audioChunksRef.current, { type: 'audio/webm' });
+      const resolvedMimeType = mediaRecorderRef.current?.mimeType || 'audio/webm';
+      const audioBlob = new Blob(audioChunksRef.current, { type: resolvedMimeType });
       revokeAudioUrl();
       const localUrl = URL.createObjectURL(audioBlob);
       audioObjectUrlRef.current = localUrl;
@@ -546,6 +567,20 @@ export default function StudentHomePage() {
   const handleBackToParticipation = () => {
     resetSessionState();
     navigate('/student');
+  };
+
+  const handleRetryTranscription = async () => {
+    if (!recordingId) return;
+    try {
+      setTranscriptionStatus('PROCESSING');
+      setTranscriptionError(null);
+      await post(`/api/sections/${SECTION_ID}/participation/recordings/${recordingId}/retry`, {});
+      pollForTranscription(recordingId);
+    } catch (err) {
+      console.error('Failed to retry transcription:', err);
+      setTranscriptionError(err.message || 'Retry failed');
+      setTranscriptionStatus('FAILED');
+    }
   };
 
   const handleLogout = () => {
@@ -823,9 +858,27 @@ export default function StudentHomePage() {
                 <p style={{ margin: 0, color: '#64748b', fontSize: '0.9rem' }}>Transcription is processing…</p>
               )}
               {transcriptionStatus === 'FAILED' && (
-                <p style={{ margin: 0, color: '#dc2626', fontSize: '0.9rem' }}>
-                  Transcription failed: {transcriptionError || 'Please try again later.'}
-                </p>
+                <div style={{ margin: 0, padding: '0.75rem', backgroundColor: '#fef2f2', border: '1px solid #fecaca', borderRadius: '6px' }}>
+                  <p style={{ margin: '0 0 0.5rem 0', color: '#dc2626', fontSize: '0.9rem' }}>
+                    Transcription failed: {transcriptionError || 'Please try again later.'}
+                  </p>
+                  <button
+                    type="button"
+                    onClick={handleRetryTranscription}
+                    style={{
+                      padding: '0.4rem 0.85rem',
+                      fontSize: '0.82rem',
+                      fontWeight: 600,
+                      backgroundColor: '#2563eb',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      cursor: 'pointer'
+                    }}
+                  >
+                    🔄 Retry Transcription
+                  </button>
+                </div>
               )}
             </div>
           )}

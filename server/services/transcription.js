@@ -10,9 +10,42 @@ export async function transcribeAudioFile(filePath, fetchImpl = fetch) {
     throw new Error('GROQ_API_KEY is not configured')
   }
 
-  const audioBuffer = await fs.readFile(filePath)
+  let audioBuffer = await fs.readFile(filePath)
+
+  // Auto-detect format & repair truncated or offset headers
+  const ebmlSignature = Buffer.from([0x1a, 0x45, 0xdf, 0xa3])
+  const ebmlIdx = audioBuffer.indexOf(ebmlSignature)
+
+  let filename = 'recording.webm'
+  let mimeType = 'audio/webm'
+
+  if (ebmlIdx > 0) {
+    // Trim stray bytes preceding the valid WebM header
+    audioBuffer = audioBuffer.subarray(ebmlIdx)
+    await fs.writeFile(filePath, audioBuffer).catch(() => {})
+  } else if (audioBuffer.length >= 3 && audioBuffer[0] === 0x45 && audioBuffer[1] === 0xdf && audioBuffer[2] === 0xa3) {
+    // Truncated first byte 0x1A: auto-prepend 0x1A
+    audioBuffer = Buffer.concat([Buffer.from([0x1a]), audioBuffer])
+    await fs.writeFile(filePath, audioBuffer).catch(() => {})
+  }
+
+  // Detect container from magic bytes
+  if (audioBuffer.length >= 8 && audioBuffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+    filename = 'recording.m4a'
+    mimeType = 'audio/mp4'
+  } else if (audioBuffer.length >= 4 && audioBuffer.subarray(0, 4).toString('ascii') === 'RIFF') {
+    filename = 'recording.wav'
+    mimeType = 'audio/wav'
+  } else if (audioBuffer.length >= 4 && audioBuffer.subarray(0, 4).toString('ascii') === 'OggS') {
+    filename = 'recording.ogg'
+    mimeType = 'audio/ogg'
+  } else if (audioBuffer.length >= 3 && (audioBuffer.subarray(0, 3).toString('ascii') === 'ID3' || (audioBuffer[0] === 0xff && (audioBuffer[1] & 0xe0) === 0xe0))) {
+    filename = 'recording.mp3'
+    mimeType = 'audio/mpeg'
+  }
+
   const form = new FormData()
-  form.append('file', new Blob([audioBuffer], { type: 'audio/webm' }), 'recording.webm')
+  form.append('file', new Blob([audioBuffer], { type: mimeType }), filename)
   form.append('model', process.env.GROQ_TRANSCRIPTION_MODEL || 'whisper-large-v3-turbo')
   form.append('language', process.env.GROQ_TRANSCRIPTION_LANGUAGE || 'en')
   form.append('prompt', process.env.GROQ_TRANSCRIPTION_PROMPT || 'Classroom discussion in English and Hinglish.')

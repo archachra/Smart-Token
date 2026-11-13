@@ -10,6 +10,7 @@ export default function ReviewPage() {
   const [customTokenValue, setCustomTokenValue] = useState(0)
   const [finalizeErrors, setFinalizeErrors] = useState({})
   const [isSubmitting, setIsSubmitting] = useState({})
+  const [retryingId, setRetryingId] = useState(null)
   const pollTimerRef = useRef(null)
 
   const fetchRecordings = async () => {
@@ -18,6 +19,18 @@ export default function ReviewPage() {
       setRecordings(data.recordings || [])
     } catch (err) {
       console.error('Failed to load recordings:', err)
+    }
+  }
+
+  const handleRetryTranscription = async (recordingId) => {
+    setRetryingId(recordingId)
+    try {
+      await post(`/api/sections/${SECTION_ID}/participation/recordings/${recordingId}/retry`, {})
+      await fetchRecordings()
+    } catch (err) {
+      console.error('Failed to retry transcription:', err)
+    } finally {
+      setRetryingId(null)
     }
   }
 
@@ -262,7 +275,27 @@ export default function ReviewPage() {
 
                         {isFailed && (
                           <div style={{ fontSize: '0.82rem', color: '#dc2626' }}>
-                            {recording.evaluationError || 'AI evaluation failed. Manual token assignment available.'}
+                            <div>{recording.transcriptionError || recording.evaluationError || 'AI evaluation failed. Manual token assignment available.'}</div>
+                            {recording.transcriptionStatus === 'FAILED' && (
+                              <button
+                                type="button"
+                                disabled={retryingId === recording.id}
+                                onClick={() => handleRetryTranscription(recording.id)}
+                                style={{
+                                  marginTop: '0.4rem',
+                                  padding: '0.3rem 0.6rem',
+                                  fontSize: '0.78rem',
+                                  fontWeight: 600,
+                                  backgroundColor: '#2563eb',
+                                  color: '#ffffff',
+                                  border: 'none',
+                                  borderRadius: '4px',
+                                  cursor: 'pointer'
+                                }}
+                              >
+                                {retryingId === recording.id ? 'Retrying…' : '🔄 Retry Transcription'}
+                              </button>
+                            )}
                           </div>
                         )}
 

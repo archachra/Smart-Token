@@ -1401,9 +1401,38 @@ app.patch('/api/sections/:sectionId/participation/recordings/:recordingId/comple
     let savedAudioPath = null
     const rawAudio = audioBase64 || audioData
     if (rawAudio) {
-      const cleanBase64 = rawAudio.replace(/^data:audio\/[a-z0-9]+;base64,/, '')
-      const buffer = Buffer.from(cleanBase64, 'base64')
-      const fileName = `${recordingId}.webm`
+      let cleanBase64 = String(rawAudio)
+      const commaIdx = cleanBase64.indexOf(',')
+      if (commaIdx !== -1 && cleanBase64.slice(0, commaIdx).includes(';base64')) {
+        cleanBase64 = cleanBase64.slice(commaIdx + 1)
+      } else {
+        cleanBase64 = cleanBase64.replace(/^data:[^;]+;base64,/, '')
+      }
+      cleanBase64 = cleanBase64.trim().replace(/\s+/g, '')
+      let buffer = Buffer.from(cleanBase64, 'base64')
+
+      // Detect and auto-repair WebM header if offset or missing 0x1A
+      const ebmlSignature = Buffer.from([0x1a, 0x45, 0xdf, 0xa3])
+      const ebmlIdx = buffer.indexOf(ebmlSignature)
+      if (ebmlIdx > 0) {
+        // Strip stray/interleaved bytes preceding the true EBML header
+        buffer = buffer.subarray(ebmlIdx)
+      } else if (buffer.length >= 3 && buffer[0] === 0x45 && buffer[1] === 0xdf && buffer[2] === 0xa3) {
+        // Prepend missing 0x1A magic byte
+        buffer = Buffer.concat([Buffer.from([0x1a]), buffer])
+      }
+
+      // Detect file extension from container signature
+      let ext = 'webm'
+      if (buffer.length >= 8 && buffer.subarray(4, 8).toString('ascii') === 'ftyp') {
+        ext = 'm4a'
+      } else if (buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === 'RIFF') {
+        ext = 'wav'
+      } else if (buffer.length >= 4 && buffer.subarray(0, 4).toString('ascii') === 'OggS') {
+        ext = 'ogg'
+      }
+
+      const fileName = `${recordingId}.${ext}`
       savedAudioPath = path.join(recordingsUploadsDir, fileName)
       fs.writeFileSync(savedAudioPath, buffer)
       savedAudioUrl = `/uploads/recordings/${fileName}`
@@ -1641,6 +1670,47 @@ app.get('/api/sections/:sectionId/participation/recordings/:recordingId/transcri
   } catch (err) {
     console.error('Error fetching recording transcription:', err)
     return res.status(500).json({ error: 'Internal server error while fetching transcription' })
+  }
+})
+
+// POST /api/sections/:sectionId/participation/recordings/:recordingId/retry - Retry transcription
+app.post('/api/sections/:sectionId/participation/recordings/:recordingId/retry', async (req, res) => {
+  const { sectionId, recordingId } = req.params
+  if (!UUID_REGEX.test(sectionId) || !UUID_REGEX.test(recordingId)) {
+    return res.status(400).json({ error: 'Invalid sectionId or recordingId UUID' })
+  }
+  try {
+    const sessionRes = await pool.query(
+      `SELECT rs.id, rs.audio_url, s.user_id AS "studentUserId"
+       FROM recording_sessions rs
+       JOIN students s ON s.id = rs.student_id
+       WHERE rs.id = $1 AND rs.section_id = $2`,
+      [recordingId, sectionId]
+    )
+    if (sessionRes.rowCount === 0) {
+      return res.status(404).json({ error: 'Recording session not found' })
+    }
+    const session = sessionRes.rows[0]
+    if (req.user.role === 'STUDENT' && req.user.userId !== session.studentUserId) {
+      return res.status(403).json({ error: 'Forbidden' })
+    }
+    if (!session.audio_url) {
+      return res.status(400).json({ error: 'No audio file recorded for this session' })
+    }
+    const filePath = path.join(__dirname, session.audio_url.replace(/^\//, ''))
+    await pool.query(
+      `UPDATE recording_sessions 
+       SET transcription_status = 'PENDING', transcription_error = NULL 
+       WHERE id = $1`,
+      [recordingId]
+    )
+    processRecordingTranscription(recordingId, filePath).catch((err) => {
+      console.error('Error in retry transcription:', err)
+    })
+    return res.status(200).json({ message: 'Transcription retry queued' })
+  } catch (err) {
+    console.error('Error retrying transcription:', err)
+    return res.status(500).json({ error: 'Internal server error while retrying transcription' })
   }
 })
 
