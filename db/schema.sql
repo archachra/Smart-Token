@@ -145,7 +145,7 @@ CREATE TABLE raised_hands (
     section_id UUID NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     raised_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
-    resolved_at TIMESTAMPTZ,
+    resolved_at TIMESTAMPTZ
 );
 
 -- 10. Recording Sessions Table (Participation Workflow State)
