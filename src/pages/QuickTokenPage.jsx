@@ -444,28 +444,12 @@ export default function QuickTokenPage() {
                       )}
                     </div>
 
-                    <div className="token-btn-group" style={{ display: 'flex', gap: '6px' }}>
-                      <button
-                        className="token-action-btn"
-                        onClick={() => handleModifyToken(student.id, 1)}
-                        title="Click to add token (+1, tap multiple times to batch)"
-                      >
-                        +1
-                      </button>
-                      <button
-                        className="token-action-btn"
-                        style={{
-                          background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
-                          borderColor: '#6d28d9',
-                          fontWeight: 700,
-                          padding: '8px 12px',
-                        }}
-                        onClick={() => handleModifyToken(student.id, 3)}
-                        title="Award 3 tokens directly"
-                      >
-                        +3
-                      </button>
-                    </div>
+                    <button
+                      className="token-action-btn"
+                      onClick={() => handleModifyToken(student.id, 1)}
+                    >
+                      +1 Token
+                    </button>
                   </div>
                 </div>
               )
@@ -515,7 +499,7 @@ export default function QuickTokenPage() {
                         </span>
                       )}
                     </span>
-                    <div className="col-action action-btn-group" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
+                    <div className="col-action action-btn-group">
                       <button
                         className="ctrl-btn dec"
                         onClick={() => handleModifyToken(student.id, -1)}
@@ -526,22 +510,8 @@ export default function QuickTokenPage() {
                       <button
                         className="token-action-btn"
                         onClick={() => handleModifyToken(student.id, 1)}
-                        title="Click to add token (+1, tap multiple times to batch)"
                       >
-                        +1
-                      </button>
-                      <button
-                        className="token-action-btn"
-                        style={{
-                          background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
-                          borderColor: '#6d28d9',
-                          fontWeight: 700,
-                          padding: '6px 12px',
-                        }}
-                        onClick={() => handleModifyToken(student.id, 3)}
-                        title="Award 3 tokens directly"
-                      >
-                        +3
+                        +1 Token
                       </button>
                     </div>
                   </div>
