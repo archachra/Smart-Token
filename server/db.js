@@ -9,11 +9,12 @@ const databaseUrl = process.env.DATABASE_URL
 let poolConfig = {}
 
 if (databaseUrl) {
+  const isLocal = databaseUrl.includes('localhost') || databaseUrl.includes('127.0.0.1')
   const needsSsl = databaseUrl.includes('sslmode=require') ||
                    databaseUrl.includes('supabase.co') ||
                    databaseUrl.includes('neon.tech') ||
                    databaseUrl.includes('render.com') ||
-                   isProduction
+                   (!isLocal && isProduction)
   poolConfig = {
     connectionString: databaseUrl,
     ssl: needsSsl ? { rejectUnauthorized: false } : false,
