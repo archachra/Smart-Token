@@ -1,8 +1,7 @@
 -- SmartToken Database Schema v1
 -- PostgreSQL 16+ schema definitions
 
--- Enable pgcrypto / uuid extension if needed
-CREATE EXTENSION IF NOT EXISTS "pgcrypto";
+-- Native gen_random_uuid() is supported in PostgreSQL 13+
 
 DROP TABLE IF EXISTS recording_sessions CASCADE;
 DROP TABLE IF EXISTS recording_evaluations CASCADE;
