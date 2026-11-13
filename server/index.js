@@ -170,15 +170,7 @@ const ALLOWED_EVENT_TYPES = ['ATTENDANCE', 'PARTICIPATION', 'TOKEN_AWARD', 'CORR
 app.get('/api/auth/me', async (req, res) => {
   try {
     const userRes = await pool.query(
-      `SELECT u.id, u.name, u.email, u.role,
-              COALESCE(
-                (SELECT s.section_name 
-                 FROM section_faculty sf 
-                 JOIN sections s ON s.id = sf.section_id 
-                 WHERE sf.faculty_id = u.id 
-                 LIMIT 1),
-                '3Q13'
-              ) AS "sectionName"
+      `SELECT u.id, u.name, u.email, u.role
        FROM users u
        WHERE u.id = $1`,
       [req.user.userId]
@@ -188,15 +180,55 @@ app.get('/api/auth/me', async (req, res) => {
     }
     const user = userRes.rows[0]
 
+    let sectionId = null
+    let sectionName = null
+    let sections = []
+
+    if (user.role === 'FACULTY') {
+      const facSections = await pool.query(
+        `SELECT s.id, s.section_name AS "sectionName", s.term
+         FROM section_faculty sf
+         JOIN sections s ON s.id = sf.section_id
+         WHERE sf.faculty_id = $1
+         ORDER BY sf.assigned_at ASC`,
+        [user.id]
+      )
+      sections = facSections.rows
+      if (sections.length > 0) {
+        sectionId = sections[0].id
+        sectionName = sections[0].sectionName
+      }
+    } else if (user.role === 'STUDENT') {
+      const stuSection = await pool.query(
+        `SELECT s.id, s.section_name AS "sectionName"
+         FROM students st
+         JOIN enrollments e ON e.student_id = st.id
+         JOIN sections s ON s.id = e.section_id
+         WHERE st.user_id = $1
+         LIMIT 1`,
+        [user.id]
+      )
+      if (stuSection.rowCount > 0) {
+        sectionId = stuSection.rows[0].id
+        sectionName = stuSection.rows[0].sectionName
+      }
+    }
+
+    // Default fallback to 3Q13 if not specifically assigned
+    user.sectionId = sectionId || '043f0728-c357-4e72-b6ce-62823cc064b7'
+    user.sectionName = sectionName || '3Q13'
+    user.sections = sections
+
     // If user's name is missing, default, or dummy 'Faculty User', resolve to the section's assigned faculty
     if (!user.name || user.name.toLowerCase().includes('faculty user') || user.name.toLowerCase() === 'faculty') {
       const assigned = await pool.query(
         `SELECT u.name 
          FROM section_faculty sf 
          JOIN users u ON u.id = sf.faculty_id 
-         WHERE sf.section_id = '043f0728-c357-4e72-b6ce-62823cc064b7' 
+         WHERE sf.section_id = $1 
          ORDER BY sf.assigned_at ASC 
-         LIMIT 1`
+         LIMIT 1`,
+        [user.sectionId]
       )
       if (assigned.rowCount > 0 && assigned.rows[0].name) {
         user.name = assigned.rows[0].name

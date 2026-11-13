@@ -1,0 +1,12 @@
+node_modules
+dist
+.git
+.github
+.gemini
+*.log
+.DS_Store
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+SmartToken_Final_Presentation.pptx
+SmartToken_UI_Screenshots.pdf
