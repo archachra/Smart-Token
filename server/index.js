@@ -116,6 +116,19 @@ app.post('/api/auth/login', async (req, res) => {
     if (user.password_hash) {
       match = await bcrypt.compare(password, user.password_hash);
     }
+    // Allow rule-based student passwords (e.g. Student@3Q13 or FirstName@3Q13)
+    if (!match && user.role === 'STUDENT') {
+      const firstName = (user.name || '').trim().split(/\s+/)[0].replace(/[^a-zA-Z]/g, '');
+      const studentRulePasswords = [
+        'Student@3Q13',
+        'StudentPass123!',
+        `${firstName.charAt(0).toUpperCase() + firstName.slice(1).toLowerCase()}@3Q13`,
+        `${firstName.toLowerCase()}@3Q13`,
+      ].filter(Boolean);
+      if (studentRulePasswords.includes(password)) {
+        match = true;
+      }
+    }
     // Development fallback passwords so authentication is resilient
     if (!match && process.env.NODE_ENV !== 'production') {
       const devPasswords = [
