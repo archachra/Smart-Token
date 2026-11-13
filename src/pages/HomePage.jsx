@@ -108,6 +108,7 @@ export default function HomePage() {
   const [presentCount, setPresentCount] = useState(0)
   const [recentTrigger, setRecentTrigger] = useState(0)
   const pollTimerRef = useRef(null)
+  const batchAwardRef = useRef(new Map())
 
   // Listen for real-time recent student award updates across pages
   useEffect(() => {
@@ -258,81 +259,105 @@ export default function HomePage() {
       if (pollTimerRef.current) clearInterval(pollTimerRef.current)
       window.removeEventListener('smarttoken-action-synced', handleActionSynced)
       window.removeEventListener('smarttoken-sync-state', handleSyncState)
+      batchAwardRef.current.forEach((batch) => {
+        clearTimeout(batch.timerId)
+        batch.flush()
+      })
+      batchAwardRef.current.clear()
     }
   }, [loadRoster, fetchEvents])
 
-  // Quick token award with live synchronization
-  const handleAddToken = async (student) => {
+  // Quick token award with debounced batch accumulator (+1, +1, +1 -> single +3 transaction)
+  const handleModifyToken = (student, delta) => {
     const sId = student.backendId || student.id
-    const clientEventId = crypto.randomUUID()
 
-    // Optimistic UI updates
+    // Optimistic UI updates immediately
     setStudents((prev) =>
-      prev.map((s) => (s.id === student.id ? { ...s, tokens: (s.tokens || 0) + 1, balance: (s.balance || 0) + 1 } : s))
+      prev.map((s) => (s.id === student.id ? { ...s, tokens: (s.tokens || 0) + delta, balance: (s.balance || 0) + delta } : s))
     )
-    setTokensToday((prev) => prev + 1)
-
-    // Append optimistic activity
-    const optimisticActivity = {
-      id: `opt-${Date.now()}`,
-      clientEventId,
-      icon: '🪙',
-      text: `${student.name} was awarded +1 Token for Quick Award`,
-      time: 'Just now',
-      isPending: false,
+    if (delta > 0) {
+      setTokensToday((prev) => prev + delta)
+      recordStudentAward(student)
     }
-    setActivities((prev) => [optimisticActivity, ...prev])
+    setRecentTrigger((c) => c + 1)
 
     // Temporary feedback toast
     setFeedback({
       id: student.id,
       name: student.name,
     })
-    recordStudentAward(student)
-    setRecentTrigger((c) => c + 1)
     setTimeout(() => {
       setFeedback((current) => (current?.id === student.id ? null : current))
     }, 2500)
 
-    // Optimistically record activity in state so ranking updates immediately
-    const optimisticEvent = {
-      id: clientEventId,
-      clientEventId,
-      sectionId: SECTION_ID,
-      studentId: sId,
-      studentName: student.name,
-      rollNumber: student.rollNumber,
-      eventType: 'TOKEN_AWARD',
-      tokenChange: 1,
-      createdAt: new Date().toISOString(),
+    // Debounce and accumulate rapid clicks for this student
+    const existing = batchAwardRef.current.get(sId)
+    let newDelta = delta
+    if (existing) {
+      clearTimeout(existing.timerId)
+      newDelta = existing.accumulatedDelta + delta
     }
-    setActivities((prev) => [optimisticEvent, ...prev])
 
-    try {
-      await queueAction({
-        actionType: 'TOKEN_AWARD',
-        endpoint: '/api/events',
-        method: 'POST',
-        sectionId: SECTION_ID,
-        studentId: sId,
-        studentName: student.name,
-        rollNumber: student.rollNumber,
-        tokenChange: 1,
-        description: 'Quick Award +1',
-        payload: {
-          clientEventId,
+    const commitBatch = async (accumulatedDelta) => {
+      batchAwardRef.current.delete(sId)
+      if (accumulatedDelta === 0) return
+
+      const clientEventId = crypto.randomUUID()
+      const isAward = accumulatedDelta > 0
+      const count = Math.abs(accumulatedDelta)
+      const tokenWord = count === 1 ? 'token' : 'tokens'
+      const description = isAward
+        ? `Quick Award +${count}`
+        : `Correction (${accumulatedDelta} ${tokenWord})`
+
+      const optimisticActivity = {
+        id: `opt-${Date.now()}`,
+        clientEventId,
+        icon: '🪙',
+        text: `${student.name} was awarded +${count} Tokens for Quick Award`,
+        time: 'Just now',
+        isPending: false,
+      }
+      setActivities((prev) => [optimisticActivity, ...prev])
+
+      try {
+        await queueAction({
+          actionType: isAward ? 'TOKEN_AWARD' : 'CORRECTION',
+          endpoint: '/api/events',
+          method: 'POST',
           sectionId: SECTION_ID,
           studentId: sId,
-          eventType: 'TOKEN_AWARD',
-          tokenChange: 1,
-          description: 'Quick Award +1',
-        },
-      })
-      await fetchEvents()
-    } catch (err) {
-      console.error('Failed to award quick token from home:', err)
+          studentName: student.name,
+          rollNumber: student.rollNumber,
+          tokenChange: accumulatedDelta,
+          description,
+          payload: {
+            clientEventId,
+            sectionId: SECTION_ID,
+            studentId: sId,
+            eventType: isAward ? 'TOKEN_AWARD' : 'CORRECTION',
+            tokenChange: accumulatedDelta,
+            description,
+          },
+        })
+        await fetchEvents()
+      } catch (err) {
+        console.error('Failed to award quick token from home:', err)
+      }
     }
+
+    const timerId = setTimeout(() => {
+      commitBatch(newDelta)
+    }, 850)
+
+    batchAwardRef.current.set(sId, {
+      accumulatedDelta: newDelta,
+      timerId,
+      flush: () => commitBatch(newDelta),
+    })
   }
+
+  const handleAddToken = (student) => handleModifyToken(student, 1)
 
   // Show the top 8 most recent events
   const displayedActivities = activities.slice(0, 8)
@@ -423,12 +448,28 @@ export default function HomePage() {
                   <span className="token-unit">tokens</span>
                 </div>
 
-                <button
-                  className="token-action-btn"
-                  onClick={() => handleAddToken(student)}
-                >
-                  +1 Token
-                </button>
+                <div className="token-btn-group" style={{ display: 'flex', gap: '6px' }}>
+                  <button
+                    className="token-action-btn"
+                    onClick={() => handleModifyToken(student, 1)}
+                    title="Click to add 1 token (rapid clicks batch together)"
+                  >
+                    +1
+                  </button>
+                  <button
+                    className="token-action-btn"
+                    style={{
+                      background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
+                      borderColor: '#6d28d9',
+                      fontWeight: 700,
+                      padding: '8px 12px',
+                    }}
+                    onClick={() => handleModifyToken(student, 3)}
+                    title="Award 3 tokens directly"
+                  >
+                    +3
+                  </button>
+                </div>
               </div>
             </div>
           ))}

@@ -76,6 +76,8 @@ async function setupDatabase() {
       ALTER TABLE recording_sessions ADD COLUMN IF NOT EXISTS transcription_error TEXT;
       ALTER TABLE recording_sessions ADD COLUMN IF NOT EXISTS transcribed_at TIMESTAMPTZ;
       ALTER TABLE recording_sessions ADD COLUMN IF NOT EXISTS audio_url TEXT;
+      ALTER TABLE recording_sessions ADD COLUMN IF NOT EXISTS reference_material TEXT;
+      ALTER TABLE recording_sessions ALTER COLUMN raised_hand_id DROP NOT NULL;
     `)
 
     // 2. Ensure Course CS101 exists

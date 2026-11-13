@@ -86,7 +86,7 @@ export default function AttendancePage() {
           )
           if (matched) {
             claimedBackendIds.add(matched.id)
-            const serverPresent = matched.attendanceStatus === 'PRESENT'
+            const serverPresent = matched.attendanceStatus !== 'ABSENT'
             return {
               ...student,
               backendId: matched.id,
@@ -110,7 +110,7 @@ export default function AttendancePage() {
             backendId: bs.id,
             rollNumber: bs.studentIdNumber || '—',
             name: bs.name,
-            isPresent: bs.attendanceStatus === 'PRESENT',
+            isPresent: bs.attendanceStatus !== 'ABSENT',
           })
         }
 

@@ -50,6 +50,7 @@ export default function QuickTokenPage() {
   const [searchQuery, setSearchQuery] = useState('')
 
   const pendingTimersRef = useRef(new Map())
+  const batchAwardRef = useRef(new Map())
   const isOnlineRef = useRef(isOnline)
   useEffect(() => {
     isOnlineRef.current = isOnline
@@ -199,6 +200,11 @@ export default function QuickTokenPage() {
       window.removeEventListener('smarttoken-action-synced', handleActionSynced)
       pendingTimersRef.current.forEach((timerId) => clearTimeout(timerId))
       pendingTimersRef.current.clear()
+      batchAwardRef.current.forEach((batch) => {
+        clearTimeout(batch.timerId)
+        batch.flush()
+      })
+      batchAwardRef.current.clear()
     }
   }, [loadRoster, loadPendingDeltas])
 
@@ -208,47 +214,76 @@ export default function QuickTokenPage() {
     return sum + s.tokens + delta
   }, 0)
 
-  const handleAddToken = async (id) => {
+  // Debounced batch accumulator: multiple rapid clicks (+1, +1, +1) are aggregated
+  // into a single transaction (e.g. +3 direct) in the history ledger and backend.
+  const handleModifyToken = (id, delta) => {
     const target = students.find((s) => s.id === id)
     if (!target) return
 
-    // Immediately record award to prioritize this student at the top of recent list
-    recordStudentAward(target)
+    if (delta > 0) {
+      recordStudentAward(target)
+    } else if (delta < 0) {
+      recordStudentCorrection(target)
+    }
     setRecentTrigger((c) => c + 1)
 
     const studentId = target.backendId
-    const clientEventId = crypto.randomUUID()
+    if (!studentId) {
+      setStudents((prev) =>
+        prev.map((s) => (s.id === id ? { ...s, tokens: Math.max(0, s.tokens + delta) } : s))
+      )
+      return
+    }
 
-    // Persist action safely in IndexedDB BEFORE reporting complete in UI
-    if (studentId) {
+    // 1. Immediately update displayed optimistic token count with zero delay
+    setPendingDeltas((prev) => ({
+      ...prev,
+      [studentId]: (prev[studentId] || 0) + delta,
+    }))
+
+    // 2. Debounce and aggregate rapid clicks within 850ms window
+    const existing = batchAwardRef.current.get(studentId)
+    let newDelta = delta
+    if (existing) {
+      clearTimeout(existing.timerId)
+      newDelta = existing.accumulatedDelta + delta
+    }
+
+    const commitBatch = async (accumulatedDelta) => {
+      batchAwardRef.current.delete(studentId)
+      if (accumulatedDelta === 0) return
+
+      const isAward = accumulatedDelta > 0
+      const actionType = isAward ? 'TOKEN_AWARD' : 'CORRECTION'
+      const count = Math.abs(accumulatedDelta)
+      const tokenWord = count === 1 ? 'token' : 'tokens'
+      const description = isAward
+        ? `Awarded ${count} ${tokenWord} for Quick Token response in class`
+        : `Corrected accidental token award (${count} ${tokenWord})`
+      const clientEventId = crypto.randomUUID()
+
       try {
         await queueAction({
-          actionType: 'TOKEN_AWARD',
+          actionType,
           endpoint: '/api/events',
           method: 'POST',
           sectionId: SECTION_ID,
           studentId: studentId,
           studentName: target.name,
           rollNumber: target.rollNumber,
-          tokenChange: 1,
-          description: 'Awarded token for Quick Token response in class',
+          tokenChange: accumulatedDelta,
+          description,
           payload: {
             sectionId: SECTION_ID,
             studentId: studentId,
-            tokenChange: 1,
-            eventType: 'TOKEN_AWARD',
-            description: 'Awarded token for Quick Token response in class',
+            tokenChange: accumulatedDelta,
+            eventType: actionType,
+            description,
             clientEventId,
           },
         })
 
-        // Optimistically update display token balance immediately
-        setPendingDeltas((prev) => ({
-          ...prev,
-          [studentId]: (prev[studentId] || 0) + 1,
-        }))
-
-        // Optimistically add event to events state so ranking updates immediately
+        // Optimistically add single aggregated event to events state
         const optimisticEvent = {
           id: clientEventId,
           clientEventId,
@@ -256,8 +291,9 @@ export default function QuickTokenPage() {
           studentId: studentId,
           studentName: target.name,
           rollNumber: target.rollNumber,
-          eventType: 'TOKEN_AWARD',
-          tokenChange: 1,
+          eventType: actionType,
+          tokenChange: accumulatedDelta,
+          description,
           createdAt: new Date().toISOString(),
         }
         setEvents((prev) => [optimisticEvent, ...prev])
@@ -267,107 +303,36 @@ export default function QuickTokenPage() {
         if (!isOnlineRef.current) {
           setVisiblePendingDeltas((prev) => ({
             ...prev,
-            [studentId]: (prev[studentId] || 0) + 1,
+            [studentId]: (prev[studentId] || 0) + accumulatedDelta,
           }))
         } else {
           const timerId = setTimeout(() => {
             pendingTimersRef.current.delete(clientEventId)
             setVisiblePendingDeltas((prev) => ({
               ...prev,
-              [studentId]: (prev[studentId] || 0) + 1,
+              [studentId]: (prev[studentId] || 0) + accumulatedDelta,
             }))
           }, PROMPT_SYNC_MS)
           pendingTimersRef.current.set(clientEventId, timerId)
         }
       } catch (err) {
-        console.error('Failed to queue token award into IndexedDB:', err)
+        console.error('Failed to queue token award/correction into IndexedDB:', err)
       }
-    } else {
-      setStudents((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, tokens: s.tokens + 1 } : s))
-      )
     }
+
+    const timerId = setTimeout(() => {
+      commitBatch(newDelta)
+    }, 850)
+
+    batchAwardRef.current.set(studentId, {
+      accumulatedDelta: newDelta,
+      timerId,
+      flush: () => commitBatch(newDelta),
+    })
   }
 
-  const handleSubtractToken = async (id) => {
-    const target = students.find((s) => s.id === id)
-    if (!target) return
-
-    recordStudentCorrection(target)
-    setRecentTrigger((c) => c + 1)
-
-    const studentId = target.backendId
-    const clientEventId = crypto.randomUUID()
-
-    // Persist action safely in IndexedDB BEFORE reporting complete in UI
-    if (studentId) {
-      try {
-        await queueAction({
-          actionType: 'CORRECTION',
-          endpoint: '/api/events',
-          method: 'POST',
-          sectionId: SECTION_ID,
-          studentId: studentId,
-          studentName: target.name,
-          rollNumber: target.rollNumber,
-          tokenChange: -1,
-          description: 'Corrected accidental token award',
-          payload: {
-            sectionId: SECTION_ID,
-            studentId: studentId,
-            tokenChange: -1,
-            eventType: 'CORRECTION',
-            description: 'Corrected accidental token award',
-            clientEventId,
-          },
-        })
-
-        // Optimistically update display token balance immediately
-        setPendingDeltas((prev) => ({
-          ...prev,
-          [studentId]: (prev[studentId] || 0) - 1,
-        }))
-
-        // Optimistically add correction to events state so ranking updates immediately
-        const optimisticCorrection = {
-          id: clientEventId,
-          clientEventId,
-          sectionId: SECTION_ID,
-          studentId: studentId,
-          studentName: target.name,
-          rollNumber: target.rollNumber,
-          eventType: 'CORRECTION',
-          tokenChange: -1,
-          createdAt: new Date().toISOString(),
-        }
-        setEvents((prev) => [optimisticCorrection, ...prev])
-
-        // For pending badge: if offline, show immediately.
-        // If online, only show if sync does not complete within prompt grace period.
-        if (!isOnlineRef.current) {
-          setVisiblePendingDeltas((prev) => ({
-            ...prev,
-            [studentId]: (prev[studentId] || 0) - 1,
-          }))
-        } else {
-          const timerId = setTimeout(() => {
-            pendingTimersRef.current.delete(clientEventId)
-            setVisiblePendingDeltas((prev) => ({
-              ...prev,
-              [studentId]: (prev[studentId] || 0) - 1,
-            }))
-          }, PROMPT_SYNC_MS)
-          pendingTimersRef.current.set(clientEventId, timerId)
-        }
-      } catch (err) {
-        console.error('Failed to queue token correction into IndexedDB:', err)
-      }
-    } else {
-      setStudents((prev) =>
-        prev.map((s) => (s.id === id ? { ...s, tokens: Math.max(0, s.tokens - 1) } : s))
-      )
-    }
-  }
+  const handleAddToken = (id) => handleModifyToken(id, 1)
+  const handleSubtractToken = (id) => handleModifyToken(id, -1)
 
   // Filter students by search query
   const filteredStudents = students.filter(
@@ -479,12 +444,28 @@ export default function QuickTokenPage() {
                       )}
                     </div>
 
-                    <button
-                      className="token-action-btn"
-                      onClick={() => handleAddToken(student.id)}
-                    >
-                      +1 Token
-                    </button>
+                    <div className="token-btn-group" style={{ display: 'flex', gap: '6px' }}>
+                      <button
+                        className="token-action-btn"
+                        onClick={() => handleModifyToken(student.id, 1)}
+                        title="Click to add token (+1, tap multiple times to batch)"
+                      >
+                        +1
+                      </button>
+                      <button
+                        className="token-action-btn"
+                        style={{
+                          background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
+                          borderColor: '#6d28d9',
+                          fontWeight: 700,
+                          padding: '8px 12px',
+                        }}
+                        onClick={() => handleModifyToken(student.id, 3)}
+                        title="Award 3 tokens directly"
+                      >
+                        +3
+                      </button>
+                    </div>
                   </div>
                 </div>
               )
@@ -534,19 +515,33 @@ export default function QuickTokenPage() {
                         </span>
                       )}
                     </span>
-                    <div className="col-action action-btn-group">
+                    <div className="col-action action-btn-group" style={{ display: 'flex', gap: '6px', alignItems: 'center' }}>
                       <button
                         className="ctrl-btn dec"
-                        onClick={() => handleSubtractToken(student.id)}
+                        onClick={() => handleModifyToken(student.id, -1)}
                         title="Decrease token count by 1"
                       >
                         -
                       </button>
                       <button
                         className="token-action-btn"
-                        onClick={() => handleAddToken(student.id)}
+                        onClick={() => handleModifyToken(student.id, 1)}
+                        title="Click to add token (+1, tap multiple times to batch)"
                       >
-                        +1 Token
+                        +1
+                      </button>
+                      <button
+                        className="token-action-btn"
+                        style={{
+                          background: 'linear-gradient(135deg, #7c3aed, #6366f1)',
+                          borderColor: '#6d28d9',
+                          fontWeight: 700,
+                          padding: '6px 12px',
+                        }}
+                        onClick={() => handleModifyToken(student.id, 3)}
+                        title="Award 3 tokens directly"
+                      >
+                        +3
                       </button>
                     </div>
                   </div>

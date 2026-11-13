@@ -308,7 +308,7 @@ app.get('/api/sections/:sectionId/students', async (req, res) => {
         s.name,
         s.student_id_number AS "studentIdNumber",
         COALESCE(sb.balance, 0) AS balance,
-        COALESCE(e.attendance_status, 'ABSENT') AS "attendanceStatus"
+        COALESCE(e.attendance_status, 'PRESENT') AS "attendanceStatus"
        FROM enrollments e
        JOIN students s ON e.student_id = s.id
        LEFT JOIN student_balances sb ON (sb.student_id = s.id AND sb.section_id = e.section_id)

@@ -97,7 +97,7 @@ CREATE TABLE enrollments (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
     section_id UUID NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
-    attendance_status VARCHAR(16) NOT NULL DEFAULT 'ABSENT',
+    attendance_status VARCHAR(16) NOT NULL DEFAULT 'PRESENT',
     enrolled_at TIMESTAMPTZ NOT NULL DEFAULT NOW(),
     CONSTRAINT unique_student_section_enrollment UNIQUE (student_id, section_id)
 );
@@ -152,11 +152,12 @@ CREATE TABLE recording_sessions (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     section_id UUID NOT NULL REFERENCES sections(id) ON DELETE CASCADE,
     student_id UUID NOT NULL REFERENCES students(id) ON DELETE CASCADE,
-    raised_hand_id UUID NOT NULL REFERENCES raised_hands(id) ON DELETE CASCADE,
+    raised_hand_id UUID REFERENCES raised_hands(id) ON DELETE CASCADE,
     status recording_status NOT NULL DEFAULT 'APPROVED',
     recording_source recording_source NOT NULL DEFAULT 'STUDENT_DEVICE',
     topic TEXT,
     extra_info TEXT,
+    reference_material TEXT,
     audio_url TEXT,
     transcript TEXT,
     transcription_status TEXT NOT NULL DEFAULT 'PENDING',
