@@ -17,6 +17,12 @@ dist-ssr
 .env*.local
 !.env.example
 
+# Presentation and Report Artifacts
+*.pptx
+*.pdf
+*.docx
+SmartToken_*
+
 # Editor directories and files
 *.traineddata
 .vscode/*
